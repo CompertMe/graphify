@@ -1,0 +1,8 @@
+{
+    "name": "fixture/laravel-inertia-app",
+    "require": {
+        "php": "^8.2",
+        "laravel/framework": "^11.0",
+        "inertiajs/inertia-laravel": "^1.0"
+    }
+}

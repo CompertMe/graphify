@@ -113,6 +113,12 @@ class Emitter:
             meta["method"] = rec.method
         if rec.view is not None:
             meta["view"] = rec.view
+        if rec.page is not None:
+            meta["inertia_page"] = rec.page
+            if rec.page_props is not None:
+                meta["inertia_props"] = list(rec.page_props)
+                if rec.page_props_partial:
+                    meta["inertia_props_partial"] = True
         if rec.redirect is not None:
             meta["redirect_to"] = rec.redirect
         if rec.resource:
@@ -145,7 +151,7 @@ class Emitter:
         idx = self.idx
         if rec.kind == "closure":
             return (idx.closure_at(rec.rel, rec.closure_line) if rec.closure_line else None), "closure"
-        if rec.kind in ("view", "redirect", "unknown"):
+        if rec.kind in ("view", "redirect", "inertia", "unknown"):
             return None, rec.kind
         cls = idx.resolve_class(rec.controller)
         if cls is None:

@@ -30,6 +30,7 @@ from .pascal_resolution import resolve_pascal_inherited_calls
 from .markdown_resolution import MARKDOWN_MENTION_SUFFIXES, resolve_markdown_mentions
 from .extractors.laravel import (
     LANGUAGE_RESOLVER as _LARAVEL_ROUTES_RESOLVER,
+    WEB_RESOLVER as _LARAVEL_WEB_RESOLVER,
     clear_scan_context as _laravel_clear_scan_context,
     set_scan_context as _laravel_set_scan_context,
 )
@@ -7593,6 +7594,8 @@ register_language_resolver(
 # handled_by / uses_middleware edges. A no-op unless the scan root is a Laravel
 # project; the scan root reaches it through _laravel_set_scan_context below.
 register_language_resolver(_LARAVEL_ROUTES_RESOLVER)
+# Inertia page edges + props contract + route('name') links; needs the route nodes above.
+register_language_resolver(_LARAVEL_WEB_RESOLVER)
 register_language_resolver(
     LanguageResolver("rust_self_member_calls", frozenset({".rs"}), _resolve_rust_self_member_calls)
 )

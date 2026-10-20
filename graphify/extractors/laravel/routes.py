@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from graphify.extractors.laravel.middleware import Entry, entries_of
+from graphify.extractors.laravel.phpprops import props_of
 from graphify.extractors.laravel.phpsrc import (
     CLOSURE_TYPES,
     Arg,
@@ -44,7 +45,7 @@ from graphify.extractors.laravel.phpsrc import (
 
 _VERBS = frozenset({"get", "post", "put", "patch", "delete", "options", "any"})
 _RESOURCES = frozenset({"resource", "apiResource", "singleton", "apiSingleton", "resources", "apiResources"})
-_SPECIAL = frozenset({"match", "redirect", "permanentRedirect", "view", "fallback", "livewire"})
+_SPECIAL = frozenset({"match", "redirect", "permanentRedirect", "view", "fallback", "livewire", "inertia"})
 _TERMINALS = _VERBS | _RESOURCES | _SPECIAL | {"group"}
 
 _RESOURCE_ACTIONS = (
@@ -105,6 +106,9 @@ class RouteRec:
     class_only: bool = False
     closure_line: int | None = None
     view: str | None = None
+    page: str | None = None              # Route::inertia component name
+    page_props: list[str] | None = None  # literal prop keys of Route::inertia
+    page_props_partial: bool = False
     redirect: str | None = None
     domain: str | None = None
     partial: str | None = None
@@ -432,6 +436,10 @@ class RouteWalker:
             kind = "view"
             view = str_value(f, pos[1].node) if len(pos) > 1 else None
             action_node = None
+        elif n == "inertia":
+            verbs = ["GET"]
+            kind = "inertia"
+            action_node = None
         elif n == "fallback":
             verbs = ["GET"]
             action_node = uri_node
@@ -463,6 +471,13 @@ class RouteWalker:
         elif kind == "view":
             rec.view = view
             rec.action = f"view:{view}" if view is not None else "view"
+        elif kind == "inertia":
+            page = str_value(f, pos[1].node) if len(pos) > 1 else None
+            props_arg = pos[2].node if len(pos) > 2 else None
+            rec.page = page
+            rec.action = f"inertia:{page}" if page is not None else "inertia"
+            if props_arg is not None:
+                rec.page_props, rec.page_props_partial = props_of(f, props_arg)
         elif kind == "livewire":
             fqn = class_ref(f, action_node)
             if fqn is None:
