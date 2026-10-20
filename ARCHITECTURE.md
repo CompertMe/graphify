@@ -196,3 +196,46 @@ Not modelled: `Route::macro`/package-registered routes, `Route::inertia`, resour
 `shallow()`/`parameters()` (flagged `partial`), `creatable()`/`destroyable()`
 singletons, `Route::group` string `namespace` beyond a literal, a route file included
 from two groups (the first context wins), and Filament resource/page routes.
+
+Laravel views, Blade and Livewire are modelled by the same package (`laravel/views.py`,
+`viewcalls.py`, `blade.py`, `livewire.py`, driven by `viewpass.py` at the end of the
+routes resolver; same gate, same scan root). One resolver maps a view name to the Blade
+file node: `resources/views` plus literal `config/view.php` paths, `ns::a.b` through
+`loadViewsFrom` / `View::addNamespace|prependNamespace|replaceNamespace` with literal
+paths (a published `resources/views/vendor/<ns>/` wins), anonymous components
+(`components/a/b.blade.php`, `a/b/index.blade.php`, `a/b/b.blade.php`,
+`Blade::anonymousComponentPath(path[, prefix])`, `<x-ns::a>`), class components
+(`App\View\Components\A\B`, `Blade::component`, `Blade::componentNamespace`; a class beats
+an anonymous view) and view-name helpers recognised from their body
+(`function theme_view($view, $area) { return "theme-{$area}::{$view}"; }`). A name that
+is dynamic, matches no file, or matches several distinct files gets no edge, and a namespace
+registered once with a non-literal path is never resolved. Runtime-decided locations (a
+theme system's `replaceNamespace("theme-{$area}", ...)`) are declared by the project in
+`.graphifyrc` (`laravel.view_namespace.<ns>=dir[,dir]`, `laravel.component_path[.prefix]=dir`;
+first listed directory wins) and the edges that use them are `INFERRED` with
+`via: "graphifyrc"`. Edges: blade file -> blade file `extends` / `includes` (`@include` and
+its `If/When/Unless/First` forms, `@each`) / `uses_component` (`@component`); blade file ->
+component class or anonymous component file `uses_component` (`<x-name>`); blade file ->
+Livewire class or single-file component `uses_component` (`<livewire:name>`,
+`@livewire('name' | \Fq\Class::class)`); PHP callable (or route node for `Route::view`) ->
+blade file `renders` (`view()`, `View::make`, `view()->make`, `->view()` / `->markdown()`,
+Livewire's `->layout('x')`, `loadView`, `new Content(view:|markdown:|html:|text:)`, `$view` properties and view-name
+helper calls; literal names only); Livewire class -> its view `renders` (`EXTRACTED` when
+`render()` returns one literal view, `INFERRED` for the `livewire.<name>` convention of a
+class without `render()`); blade file -> Livewire method `binds_method` for
+`wire:click|submit|...="save"` (arguments stripped; `$refresh`/`$set`/expressions give
+nothing) and `$wire.save()`, only when exactly one component owns the view (`INFERRED`
+when ownership came from the convention). A Livewire class is a class whose `extends`
+reaches `Livewire\Component`; its names are `Livewire::component` registrations plus
+`App\Livewire`-relative kebab-cased paths (a class elsewhere has none). Livewire 4
+single-file components (`⚡name.blade.php`) become a `livewire_component` node with
+`method` edges. Section/yield/stack names and `wire:model` properties are metadata on the
+Blade file node (`metadata.blade`, `metadata.livewire`), not nodes. The legacy Blade
+extractor's fake stub targets are flagged (`_drop`) and removed by `extract()` for every
+Blade file of a Laravel project; outside one the old output is unchanged. Not modelled:
+the `#[Layout]` attribute, `@includeFirst` beyond its first element, Volt functional
+components, multi-file Livewire components, `Fortify::*View('name')`,
+`Mail::send('view', ...)`, a class constant in `@livewire(...)` imported by `@php use`,
+partials included from a Livewire view (they get no owner), `module_path()`-style path
+helpers, a theme view that exists in two themes without a `.graphifyrc` choice, and a
+component name defined by both a class and a single-file component (ambiguous, no edge).

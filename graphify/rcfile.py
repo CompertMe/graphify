@@ -21,6 +21,10 @@ One ``key=value`` per line, ``#`` comments, blank lines ignored. Keys:
     depending on the project; ``.m`` is Objective-C or MATLAB; ``.h`` is C or
     C++) has no single correct global mapping, so the project declares it.
 
+``laravel.view_namespace.<ns>=<dir>[,<dir>]`` / ``laravel.component_path[.<prefix>]=<dir>``
+    Where a Laravel project's runtime-decided view locations live (a theme system);
+    read by :mod:`graphify.extractors.laravel.viewconfig`, not by this module.
+
 The parser imports :mod:`graphify.detect` lazily only when it must validate
 an explicit extension.  This avoids a module-level import cycle while keeping
 typos from silently disabling classification.

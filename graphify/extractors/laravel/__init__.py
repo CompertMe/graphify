@@ -16,6 +16,7 @@ Laravel project (no ``artisan`` at the root, no ``laravel/framework`` in
 """
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from graphify.extractors.laravel.phpsrc import PhpFile, load_php_file
 from graphify.extractors.laravel.project import is_laravel_project
 from graphify.extractors.laravel.routes import Ctx, RouteWalker
 from graphify.extractors.laravel.symbols import SymbolIndex
+from graphify.extractors.laravel.viewpass import run_view_passes
 from graphify.resolver_registry import LanguageResolver
 
 __all__ = [
@@ -56,6 +58,7 @@ def resolve_laravel_routes(per_file: list, all_nodes: list[dict], all_edges: lis
         return
     idx = SymbolIndex(root, all_nodes, all_edges)
     if not idx.php_files:
+        _model_views(root, idx, per_file, all_nodes, all_edges)  # a project of Blade files only
         return
 
     cache: dict[str, PhpFile | None] = {}
@@ -113,6 +116,17 @@ def resolve_laravel_routes(per_file: list, all_nodes: list[dict], all_edges: lis
             emitter.panel(panel)
     all_nodes.extend(emitter.nodes)
     all_edges.extend(emitter.edges)
+
+    _model_views(root, idx, per_file, all_nodes, all_edges)
+
+
+def _model_views(root: Path, idx: SymbolIndex, per_file: list, all_nodes: list[dict], all_edges: list[dict]) -> None:
+    """Blade / view / Livewire modelling (views.py, viewpass.py). A failure there must not
+    take the route nodes with it."""
+    try:
+        run_view_passes(root, idx, per_file, all_nodes, all_edges)
+    except Exception as exc:
+        logging.getLogger(__name__).warning("laravel view modelling failed, skipping: %s", exc)
 
 
 LANGUAGE_RESOLVER = LanguageResolver(
