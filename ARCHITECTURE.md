@@ -168,3 +168,31 @@ constants and never call targets, so a global helper such as `app()` cannot bind
 `Enum::APP`. Incremental rebuilds forward `case_of` context edges so unchanged enum
 files are excluded the same way. Other languages are unchanged (Swift payload cases
 and Rust variants are callable).
+
+Laravel routes are modelled by `graphify/extractors/laravel/`, a registry resolver
+(`laravel_routes`, PHP suffixes) that runs only for a Laravel project: `artisan` at the
+scan root, or `laravel/framework` in `composer.json`. Any other PHP corpus comes out
+byte-identical, even if it calls `Route::get`. `extract()` hands the pass its scan root
+through `set_scan_context`; the pass reads route files with tree-sitter-php, resolving
+every class name with `_php_fqn_from_raw`. It adds one node per route definition
+(`metadata.kind == "laravel_route"`; label `GET /branches/{branch}`; metadata `verbs`,
+full `uri` after group prefixes, `name` after group `as`/`name()` prefixes, `middleware`
+as written after group inheritance minus `withoutMiddleware`, `abilities` from `can:`,
+`action`, `partial`), contained by its route file, and two edge relations sourced at the
+route: `handled_by` to the controller method (own, trait or in-corpus ancestor; a method
+only a vendor class could declare gets no edge), the closure node, or the component class
+of a full-page Livewire route, and `uses_middleware` to in-corpus middleware classes.
+`EXTRACTED` means the route statement names the target; `INFERRED` marks what a
+convention or a config table supplies: `Route::resource` expansion, and middleware
+reached through an alias, a group (`web`, `api`, `$middlewareGroups`, `group()`) or the
+global stack (`via` names which). Group context is inherited through closures,
+`->group(__DIR__.'/x.php')`, `require`, `loadRoutesFrom`, `bootstrap/app.php`
+`withRouting(web:, api:, then:)` and route service providers; an inheritance chain that
+cannot be read as literals, or a route file nothing loads, still yields the route with
+`partial: true` and a `partial_reason`. Filament panel providers become one
+`filament_panel` node with `uses_middleware` edges for `->middleware()` and
+`->authMiddleware()`. `route_name_index(nodes)` maps a route name to its node ids.
+Not modelled: `Route::macro`/package-registered routes, `Route::inertia`, resource
+`shallow()`/`parameters()` (flagged `partial`), `creatable()`/`destroyable()`
+singletons, `Route::group` string `namespace` beyond a literal, a route file included
+from two groups (the first context wins), and Filament resource/page routes.
