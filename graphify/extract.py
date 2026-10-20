@@ -28,6 +28,11 @@ from .csharp_dispatch import resolve_csharp_interface_dispatch
 from .swift_dispatch import resolve_swift_protocol_dispatch
 from .pascal_resolution import resolve_pascal_inherited_calls
 from .markdown_resolution import MARKDOWN_MENTION_SUFFIXES, resolve_markdown_mentions
+from .extractors.laravel import (
+    LANGUAGE_RESOLVER as _LARAVEL_ROUTES_RESOLVER,
+    clear_scan_context as _laravel_clear_scan_context,
+    set_scan_context as _laravel_set_scan_context,
+)
 
 # --- migrated to graphify/extractors/ (see graphify/extractors/MIGRATION.md) ---
 from graphify.rcfile import (
@@ -7581,6 +7586,10 @@ register_language_resolver(
 register_language_resolver(
     LanguageResolver("php_class_constant_refs", frozenset({".php"}), _resolve_php_class_constant_refs)
 )
+# Laravel route modelling (graphify.extractors.laravel): route nodes plus
+# handled_by / uses_middleware edges. A no-op unless the scan root is a Laravel
+# project; the scan root reaches it through _laravel_set_scan_context below.
+register_language_resolver(_LARAVEL_ROUTES_RESOLVER)
 register_language_resolver(
     LanguageResolver("rust_self_member_calls", frozenset({".rs"}), _resolve_rust_self_member_calls)
 )
@@ -10952,15 +10961,19 @@ def extract(
     # unchanged file is ever emitted, and the ambiguity guards count the same
     # candidates a full build would (the context is the whole unchanged corpus).
     _stamp_python_fixture_paths(per_file, root)
-    if resolution_context_nodes or resolution_context_edges:
-        _rl_nodes = list(resolution_nodes)
-        _rl_edges = all_edges + list(resolution_context_edges or [])
-        _n0, _e0 = len(_rl_nodes), len(_rl_edges)
-        run_language_resolvers(paths, per_file, _rl_nodes, _rl_edges)
-        all_nodes.extend(_rl_nodes[_n0:])
-        all_edges.extend(_rl_edges[_e0:])
-    else:
-        run_language_resolvers(paths, per_file, all_nodes, all_edges)
+    _laravel_set_scan_context(root)
+    try:
+        if resolution_context_nodes or resolution_context_edges:
+            _rl_nodes = list(resolution_nodes)
+            _rl_edges = all_edges + list(resolution_context_edges or [])
+            _n0, _e0 = len(_rl_nodes), len(_rl_edges)
+            run_language_resolvers(paths, per_file, _rl_nodes, _rl_edges)
+            all_nodes.extend(_rl_nodes[_n0:])
+            all_edges.extend(_rl_edges[_e0:])
+        else:
+            run_language_resolvers(paths, per_file, all_nodes, all_edges)
+    finally:
+        _laravel_clear_scan_context()
 
     # A Rust `use` group keeps one edge per binding; its v8 edge only served the calls above.
     all_edges[:] = [e for e in all_edges if not e.pop("_rust_use_group", False)]
