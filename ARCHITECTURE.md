@@ -161,3 +161,10 @@ ambiguous one binds nothing. `self`/`static` resolve to the enclosing type; `par
 `$var::` get no edge. Case names match case-sensitively. `Enum::from/tryFrom/cases()`
 (implicit statics with no method node) are `calls` edges to the enum, whose scope is
 still found by unique name. AST cache schema 18.
+
+PHP enum cases (`case_of` targets) are excluded from the cross-file call-resolution
+indexes, including the case-folded one PHP functions use: cases are case-sensitive
+constants and never call targets, so a global helper such as `app()` cannot bind to
+`Enum::APP`. Incremental rebuilds forward `case_of` context edges so unchanged enum
+files are excluded the same way. Other languages are unchanged (Swift payload cases
+and Rust variants are callable).
