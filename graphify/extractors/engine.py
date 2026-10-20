@@ -8695,20 +8695,54 @@ def _extract_generic(
             return None
         return _read_text(scope, source)
 
+    def _php_class_const_parts(n) -> tuple[str, str] | None:
+        # `Scope::MEMBER` is two named children: the scope (`name`,
+        # `qualified_name`, or `relative_scope` for self/static/parent) and the
+        # member `name`. `Foo::class` is the class-name literal, not a member.
+        named = [c for c in n.children if c.is_named and c.type != "comment"]
+        if len(named) != 2 or named[1].type != "name":
+            return None
+        scope_text = _read_text(named[0], source)
+        member = _read_text(named[1], source)
+        if not scope_text or not member or member == "class":
+            return None
+        return scope_text, member
+
     # PHP `self::class` / `static::class`: only a real class (one with members or a
     # property initializer) can be the enclosing class; a free function cannot.
     _php_class_owners: set[str] = set(method_owner.values()) | {o for o, _ in initializer_nodes}
 
     def _php_emit_class_constant(n, caller_nid: str) -> None:
-        """`Foo::BAR` / `Foo::class` -> references_constant edge from ``caller_nid``.
+        """`Foo::class` -> references_constant edge from ``caller_nid`` to the class.
 
         `self`/`static` name the enclosing class (the caller itself for a property
         default). Any other name is handed to `_resolve_php_type_references` as
         written (`_php_raw`: use alias, same namespace or leading-`\\` FQCN); the
         target here is only a placeholder id, and an unresolved name drops the edge.
+
+        `Foo::BAR` (any member but `class`) is NOT emitted here: it is parked as a
+        ``php_const_ref`` raw_call and bound once, by `_resolve_php_class_constant_refs`
+        (to the enum case node, else to the class), so one access never yields two
+        edges. That resolver takes the scope's class from the PHP name rules the
+        type-reference pass applies (`php_scope_nid`).
         """
         class_name = _php_class_const_scope(n)
         if not class_name:
+            return
+        const_parts = _php_class_const_parts(n)
+        if const_parts is not None:
+            if caller_nid:
+                # Carried in raw_calls (no `callee`, so every call pass skips it)
+                # because that is the list whose `caller_nid` and `source_file`
+                # the id remaps and cache portability rewrite.
+                raw_calls.append({
+                    "caller_nid": caller_nid,
+                    "php_const_ref": True,
+                    "receiver": const_parts[0],
+                    "const_name": const_parts[1],
+                    "source_file": str_path,
+                    "source_location": f"L{n.start_point[0] + 1}",
+                })
             return
         lowered = class_name.lower()
         raw_name = None

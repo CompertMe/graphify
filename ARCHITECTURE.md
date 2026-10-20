@@ -126,12 +126,14 @@ lack this path. The merge runs after colliding ids are salted apart by path, so
 a half whose file stem collides with another file's (`Spec.cs` and `_Spec.cs`,
 `Cfg/Helpers.cs` and `Cfg_Helpers.cs`) still merges and keeps its members.
 
-PHP class names written in source (`Foo::class` and other `Foo::BAR` class
-constants, plus type hints) resolve with PHP's own name-resolution rules in
+PHP class names written in source (`Foo::class`, `Foo::BAR` class constants and
+enum cases, plus type hints) resolve with PHP's own name-resolution rules in
 `_resolve_php_type_references`: `use` alias, same namespace, or a leading-`\`
-FQCN, each tying the edge to the one declaration with that FQN (`EXTRACTED`).
-The extractor records the name as written on the edge (`_php_raw`, stripped
-before output) and `self`/`static` map to the enclosing class. A name imported
+FQCN, each tying the reference to the one declaration with that FQN (`EXTRACTED`).
+For `Foo::class` and type hints the extractor records the name as written on the
+edge (`_php_raw`, stripped before output); `Foo::BAR` is parked as a `raw_calls`
+entry instead (next paragraph) that the same pass annotates with the scope's
+resolved class (`php_scope_nid`). `self`/`static` map to the enclosing class. A name imported
 from outside the corpus keeps the shared FQN-labelled external stub; a
 `::class` that resolves to neither is dropped, never guessed. Not covered:
 `Foo::class` in a method's parameter default, a `new \A\B()` or static call
@@ -144,3 +146,18 @@ When normal ID normalization removes an entire binding name, its UTF-8 bytes
 provide a deterministic operator suffix within the same lexical owner. Its double
 underscore separators cannot collide with an ordinary normalized binding ID. Local
 call resolution stops if malformed scope metadata cycles.
+
+PHP `Scope::MEMBER` accesses (`class_constant_access_expression`, member other than
+`class`) are the only ones not emitted by the extractor: each is parked as a
+`raw_calls` entry tagged `php_const_ref` and bound exactly once by the
+`php_class_constant_refs` resolver (`Foo::class` stays with the paragraph above, so one
+access never yields two edges). The scope class is the one `_resolve_php_type_references`
+found with the PHP name rules; a member that is a case of that enum gets a
+`references_constant` edge to the case node, any other member (PHP class constants are
+not nodes) links to the class with the same relation. A same-named type in another
+namespace is never picked, and an unresolved name gets no edge. Only a file the name pass
+skipped (multi-namespace file, no parser) falls back to a unique unqualified name, and an
+ambiguous one binds nothing. `self`/`static` resolve to the enclosing type; `parent` and
+`$var::` get no edge. Case names match case-sensitively. `Enum::from/tryFrom/cases()`
+(implicit statics with no method node) are `calls` edges to the enum, whose scope is
+still found by unique name. AST cache schema 18.

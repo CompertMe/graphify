@@ -4275,6 +4275,27 @@ def _resolve_php_type_references(
             edge.pop("_php_raw", None)
         # non-explicit miss: leave the bare stub for the legacy rewire
 
+    # `Scope::MEMBER` accesses (enum cases, class constants) are parked as
+    # `php_const_ref` raw_calls and bound later by `_resolve_php_class_constant_refs`.
+    # Give each one the scope class under the same PHP name rules as `Foo::class`
+    # (`php_scope_nid`; "" = names no in-corpus declaration), so a same-named type in
+    # another namespace is never picked. Files this pass skipped stay unannotated.
+    for result in per_file:
+        for ref in result.get("raw_calls", []):
+            if not ref.get("php_const_ref"):
+                continue
+            ref_file = ref.get("source_file", "")
+            scope = str(ref.get("receiver") or "").strip()
+            if (
+                ref_file not in ns_by_file
+                or not scope
+                or scope.startswith("$")
+                or scope.lower() in ("self", "static", "parent")
+            ):
+                continue
+            ref_fqn = _php_fqn_from_raw(scope, ns_by_file[ref_file], uses_by_file.get(ref_file, {}))
+            ref["php_scope_nid"] = fqn_to_id.get(ref_fqn.lower(), "")
+
     if new_nodes:
         all_nodes.extend(new_nodes)
     if not repointed_from:
