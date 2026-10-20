@@ -131,3 +131,12 @@ When normal ID normalization removes an entire binding name, its UTF-8 bytes
 provide a deterministic operator suffix within the same lexical owner. Its double
 underscore separators cannot collide with an ordinary normalized binding ID. Local
 call resolution stops if malformed scope metadata cycles.
+
+PHP `Scope::MEMBER` accesses (`class_constant_access_expression`) are parked as
+`raw_calls` entries tagged `php_const_ref` and bound by the `php_class_constant_refs`
+resolver. A member that is a case of the (uniquely named, in-corpus) scope enum gets a
+`references_constant` edge to the case node; any other member (PHP class constants are
+not nodes) links to the scope type with the same relation. `self`/`static` resolve to
+the enclosing type; `parent`, `$var::` and unresolved or ambiguous scopes get no edge.
+Case names match case-sensitively. `Enum::from/tryFrom/cases()` (implicit statics with
+no method node) are `calls` edges to the enum. AST cache schema 18.
