@@ -34,6 +34,7 @@ from graphify.resolver_registry import LanguageResolver
 
 __all__ = [
     "LANGUAGE_RESOLVER",
+    "RUNTIME_RESOLVER",
     "WEB_RESOLVER",
     "resolve_laravel_web",
     "ROUTE_KIND",
@@ -155,3 +156,20 @@ WEB_RESOLVER = LanguageResolver(
     frozenset({".php", ".vue", ".js", ".jsx", ".ts", ".tsx", ".mjs"}),
     resolve_laravel_web,
 )
+
+
+def resolve_laravel_runtime(per_file: list, all_nodes: list[dict], all_edges: list[dict]) -> None:
+    """Commands, scheduler, jobs, events, listeners, observers, container bindings (see ``runtime``)."""
+    root = _scan_root
+    if root is None or not is_laravel_project(root):
+        return
+    from graphify.extractors.laravel import runtime
+
+    try:
+        runtime.run(root, per_file, all_nodes, all_edges)
+    except Exception as exc:  # a wiring pass must never take the extraction down
+        logging.getLogger(__name__).warning("laravel runtime modelling failed, skipping: %s", exc)
+
+
+# Needs the class and method nodes only, so its place after the route passes is conventional.
+RUNTIME_RESOLVER = LanguageResolver("laravel_runtime", frozenset({".php"}), resolve_laravel_runtime)

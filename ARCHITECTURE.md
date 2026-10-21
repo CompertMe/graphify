@@ -293,3 +293,69 @@ components, multi-file Livewire components, `Fortify::*View('name')`,
 partials included from a Livewire view (they get no owner), `module_path()`-style path
 helpers, a theme view that exists in two themes without a `.graphifyrc` choice, and a
 component name defined by both a class and a single-file component (ambiguous, no edge).
+
+Laravel runtime wiring (`laravel/runtime.py`, `console.py`, `dispatch.py`, `container.py`,
+helpers in `phpread.py`; a third registry resolver, `laravel_runtime`, same gate, runs after
+`laravel_web`) models what the framework connects at run time. Class names go through
+`PhpFile.class_fqn` (`_php_fqn_from_raw`) and `SymbolIndex.resolve_class`; whether a class is a
+job, an event or a command is read from its own source (`extends` / `implements` / trait
+`use`, resolved the same way), never from the graph's `inherits` edges, so an incremental
+rebuild sees the same answer. A vendor ancestor (`ShouldQueue`, `Dispatchable`) is judged by its
+FQN, which is why `X::dispatch()` works even though the trait it comes from does not resolve.
+
+- **Commands and scheduler** (`console.py`). The class node of a command gets
+  `command_name` / `command_signature` / `command_source` metadata (`$signature` before the
+  first argument or option, else `$name`, else `#[AsCommand(name:)]`; the class must extend
+  something named `*Command` or carry the attribute). `Artisan::command('sig', fn)` is a
+  `laravel_command` node with a `handled_by` edge to its closure. One `laravel_schedule` node
+  per `Schedule::command|job|call` statement (facade, `$schedule` parameter typed `Schedule`,
+  or a variable named `$schedule`; `Console\Kernel::schedule`, `routes/console.php`,
+  `withSchedule`), with `frequency` (the chain as written), `options`, and `cron` (the literal
+  of `->cron('...')`, or derived from `daily()` / `dailyAt('13:00')` / `everyFiveMinutes()` /
+  `weekdays()` ... with `cron_source: literal|derived`; no `cron` when the chain holds a method
+  the table does not know). `schedules` goes entry -> command class, closure command, job class or
+  closure; a name no in-corpus command declares (vendor), or that two declare, leaves the entry
+  with `unresolved` and no edge. `invokes_command`: method/closure -> command for
+  `Artisan::call|queue('sig' ...)` and `$this->call|callSilent('sig' | X::class)`.
+- **Jobs and events** (`dispatch.py`). `dispatches`: caller -> job for `X::dispatch|dispatchSync|
+  dispatchNow|dispatchAfterResponse|dispatchIf|dispatchUnless`, `dispatch(new X)`,
+  `dispatch_sync/now`, `Bus::dispatch(new X)`, `Bus::chain|batch([...])` (nested arrays),
+  `->chain([...])`, `X::withChain`, `$this->dispatch(new X)` and `Queue::push`. A static
+  `X::dispatch()` needs the class (or an in-corpus ancestor / trait) to list the Bus
+  `Dispatchable`, `ShouldQueue` or `Queueable`, and the corpus not to define `dispatch` itself;
+  a class under `Jobs/` that has some vendor ancestor and calls an unseen `dispatch` is
+  `INFERRED` (`via: jobs-directory`). `dispatches_event`: `event(new E)`, `broadcast`,
+  `Event::dispatch|until`, `E::dispatch()` with the Events `Dispatchable`. `notifies`
+  (`->notify(new N)`, `Notification::send`), `sends_mail` (`Mail::...->send|queue|later(new M)`).
+  `listens_to`, listener or closure -> event: `Event::listen(E::class, L::class | [L::class, 'm'] |
+  'L@m' | closure)` and `Event::listen(fn (E $e) => ...)`, `$listen` / `events()` / `listens()` of a
+  `*ServiceProvider` (`JobPipeline::make([J::class, ...])` makes each job the listener),
+  `subscribe(Dispatcher $events)` bodies, `#[ListensTo]`; `EXTRACTED`. Laravel's auto-discovery
+  (`handle*` / `__invoke` first parameter typed with the event, in a class under `app/Listeners`)
+  is `INFERRED` (`via: auto-discovery`) and skipped where a registration already pairs the two.
+  A vendor event is the external stub node of the imported class (no stub, no edge).
+  `observes`, observer -> model: `Model::observe(O::class | [..] | new O)` (also `static::`),
+  `#[ObservedBy]`.
+- **Container** (`container.py`). `binds`: `$this->app|app()|App::` `bind|singleton|scoped|instance`
+  (and `*If`) with `A::class` and a concrete given as `B::class`, `fn () => new B`,
+  `function () { return $app->make(B::class); }`, plus `$bindings` / `$singletons`; `EXTRACTED`.
+  The source is the abstract (in-corpus class, else the external stub of the imported vendor
+  class), or the registering method when the abstract is a string alias; the edge says
+  `abstract`, `binding`, `conditional` (inside an `if`) and `alternatives` (the abstract has other
+  concretes or an unreadable binding). Self-bindings and closures that do more than create one
+  class give no edge. `facade_for`: a class declaring `getFacadeAccessor()` -> the class it
+  returns (`EXTRACTED`), -> the one concrete a string accessor is bound to (`EXTRACTED`), and a
+  second edge to the one concrete an abstract accessor is bound to (`INFERRED`, `via: binding`).
+- **Graph collapse.** The built graph keeps one edge per node pair. `build.py` therefore lets
+  a `binds` edge win over `implements` / `inherits` / `mixes_in` on the same pair and records the
+  type link as `also_relations`, and treats `references_constant` like `references` (generic) so
+  a `Foo::class` mention does not displace `dispatches` / `invokes_command` / `binds`.
+
+Not modelled: string event names (`Event::listen('user.created', ...)`), `dispatch($variable)`,
+model `$dispatchesEvents`, `withEvents(discover: [...])` directories other than `app/Listeners`,
+contextual bindings (`when()->needs()->give()`), `extend` / `alias`, bindings registered by
+packages, a `$schedule` that is not typed or named `schedule`, `Schedule::exec`, schedule
+frequencies the cron table does not know (the entry keeps `frequency`, no `cron`),
+`Artisan::call(X::class)`, `$aliases` of a command, and resolving a call on an interface-typed
+property to the bound concrete method (the typed-receiver edge still points at the contract; the
+`binds` / `facade_for` edges are what link it to the concrete class).

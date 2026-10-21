@@ -159,6 +159,18 @@ def _lost_saved_semantic_nodes(
 # same-direction comparison this collapse needs. The one opposite-direction
 # exception is _STRUCTURAL_MEMBER_RELATIONS.
 _GENERIC_RELATIONS: frozenset[str] = frozenset({"references", "uses", "mentions"})
+# Laravel runtime wiring (graphify.extractors.laravel.runtime). Each says more about a
+# pair than the `Foo::class` mention (`references_constant`) the PHP extractor adds for
+# the same pair, and that mention sorts after most of them, so it must not displace them.
+_RUNTIME_RELATIONS: frozenset[str] = frozenset({
+    "binds", "dispatches", "dispatches_event", "facade_for", "invokes_command", "listens_to",
+    "notifies", "observes", "schedules", "sends_mail",
+})
+# A container binding (`binds`: abstract -> concrete) and the fact that the concrete class
+# implements / extends the abstract share one node pair, and the simple graph keeps one
+# edge per pair. `binds` is the claim the type link cannot make, so it stays the edge and
+# records the type link in `also_relations` instead of losing it.
+_TYPE_LINK_RELATIONS: frozenset[str] = frozenset({"inherits", "implements", "mixes_in"})
 # Membership of a type or file. On an undirected graph these share a node pair
 # with a `calls` edge in the opposite direction when a member calls or constructs
 # its owner (`static Report Fault() { return new Report(); }`). Last-write kept
@@ -1711,6 +1723,15 @@ def build_from_json(extraction: dict, *, directed: bool = False, root: str | Pat
         # causing display functions to show edges backwards.
         attrs["_src"] = src
         attrs["_tgt"] = tgt
+        if G.has_edge(src, tgt):
+            _bound: dict = edge_data(G, str(src), str(tgt))
+            _bound_rel, _new_rel = str(_bound.get("relation")), str(attrs.get("relation"))
+            if "binds" in (_bound_rel, _new_rel) and {_bound_rel, _new_rel} & _TYPE_LINK_RELATIONS:
+                _also = {str(r) for r in (*_bound.get("also_relations", ()), *attrs.get("also_relations", ()))}
+                if _bound_rel == "binds":
+                    _bound["also_relations"] = sorted(_also | {_new_rel})
+                    continue
+                attrs["also_relations"] = sorted(_also | {_bound_rel})
         # Before the drops below, so a runtime import that folds into a
         # type-only edge still clears its marker (#3159). The reverse-direction
         # duplicate that the undirected graph drops (#1061) is another file's
@@ -1766,6 +1787,8 @@ def build_from_json(extraction: dict, *, directed: bool = False, root: str | Pat
         if G.has_edge(src, tgt):
             existing_attrs = edge_data(G, src, tgt)
             existing_rel = existing_attrs.get("relation")
+            if attrs.get("relation") == "references_constant" and existing_rel in _RUNTIME_RELATIONS:
+                continue
             if (
                 attrs.get("relation") in _GENERIC_RELATIONS
                 and existing_rel is not None
