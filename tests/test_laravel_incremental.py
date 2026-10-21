@@ -33,8 +33,9 @@ FILES = {
         "Route::get('/pages', [PageController::class, 'index'])->name('pages.index');\n"
     ),
     "app/Http/Controllers/PageController.php": (
-        "<?php\n\nnamespace App\\Http\\Controllers;\n\n"
-        "class PageController\n{\n    public function index()\n    {\n        return 'ok';\n    }\n\n"
+        "<?php\n\nnamespace App\\Http\\Controllers;\n\nuse Inertia\\Inertia;\n\n"
+        "class PageController\n{\n    public function index()\n    {\n"
+        "        return Inertia::render('Home', ['title' => 'x']);\n    }\n\n"
         "    public function show()\n    {\n        return 'ok';\n    }\n}\n"
     ),
     "resources/js/Pages/Home.vue": (
@@ -119,6 +120,8 @@ def test_fixture_models_the_edges_the_scenarios_rely_on(tmp_path):
     graph = _rebuild(_project(tmp_path))
     assert _relations(graph, "calls_route", "Home.vue"), "Home.vue -> route edge missing from the fixture graph"
     assert any(n.get("metadata", {}).get("kind") == "laravel_schedule" for n in graph["nodes"])
+    # The props contract is stored on the page node by swapping it for an annotated copy.
+    assert any("inertia_props_passed" in (n.get("metadata") or {}) for n in graph["nodes"])
 
 
 def test_route_uri_change(tmp_path):

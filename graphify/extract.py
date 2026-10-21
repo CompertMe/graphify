@@ -11039,7 +11039,16 @@ def extract(
             _rl_nodes = list(resolution_nodes)
             _rl_edges = all_edges + list(resolution_context_edges or [])
             _n0, _e0 = len(_rl_nodes), len(_rl_edges)
+            _rl_before = list(_rl_nodes)
             run_language_resolvers(paths, per_file, _rl_nodes, _rl_edges)
+            # A resolver may swap a node for an annotated copy in place (the Laravel props contract
+            # and missing-key reports do), which the scratch list alone would swallow: carry each
+            # swapped slot back onto the fresh node it replaced.
+            _swapped = {
+                id(old): new for old, new in zip(_rl_before, _rl_nodes[:_n0]) if old is not new
+            }
+            if _swapped:
+                all_nodes[:] = [_swapped.get(id(n), n) for n in all_nodes]
             all_nodes.extend(_rl_nodes[_n0:])
             all_edges.extend(_rl_edges[_e0:])
         else:
