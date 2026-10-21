@@ -90,6 +90,7 @@ MODEL_RELATIONS = {
     ("eloquent_morph_many", "Client", "Comment"),
     ("eloquent_has_many_through", "Client", "Employee"),
     ("eloquent_morph_to_many", "Comment", "Tag"),
+    ("eloquent_morph_many", "HasAuditTrail", "Comment"),      # a trait's relation method, from the trait
 }
 
 
@@ -142,6 +143,7 @@ def test_every_relation_method_has_its_own_typed_edge(graph):
         ("eloquent_morph_to_many", ".tags()", "Tag"),
         ("eloquent_morph_one", ".pinnedTag()", "Tag"),
         ("eloquent_morphed_by_many", ".branches()", "Branch"),
+        ("eloquent_morph_many", ".auditNotes()", "Comment"),
     }
 
 
@@ -158,6 +160,12 @@ def test_relation_method_carries_metadata(graph):
     assert not [e for e, s, _t in _edges(graph, "eloquent_morph_to") if _label(s) in (".owner()", "Branch")]
 
 
+def test_relation_defined_in_a_trait(graph):
+    e = _edge(graph, "eloquent_morph_many", ".auditNotes()", "Comment")
+    assert e["source_file"] == "app/Models/Concerns/HasAuditTrail.php" and e["morph_name"] == "commentable"
+    assert _edge(graph, "eloquent_morph_many", "HasAuditTrail", "Comment")["method"] == "auditNotes"
+
+
 def test_non_literal_related_class_gives_nothing(graph):
     assert not [1 for _e, s, _t in _edges(graph, "eloquent_has_many") if _label(s) == ".dynamic()"]
 
@@ -168,6 +176,8 @@ def test_phase0_reference_is_replaced_not_duplicated(graph):
     assert (".client()", "Client") not in generic
     assert ("Branch", "BranchType") not in generic          # cast target
     assert ("BranchResource", "Branch") not in generic      # $model
+    # A page's `$resource = BranchResource::class` is the inverse reference on the same node pair.
+    assert ("ListBranches", "BranchResource") not in generic
 
 
 # ── casts ───────────────────────────────────────────────────────────────────
@@ -192,7 +202,7 @@ def test_model_metadata_records_casts_and_table(graph):
 def test_one_node_per_table_with_deterministic_id(graph):
     tables = {n["id"]: n for n in graph["nodes"] if (n.get("metadata") or {}).get("kind") == "db_table"}
     assert set(tables) == {
-        "table:addresses", "table:branch_tag", "table:branches", "table:categories", "table:clients",
+        "table:addresses", "table:audits", "table:branch_tag", "table:branches", "table:categories", "table:clients",
         "table:comments", "table:people", "table:shared_records", "table:staff_members", "table:tags",
         "table:users",
     }                                  # `dyn_a` / `dyn_b` (non-literal names) are not modelled
@@ -226,6 +236,7 @@ def test_migrations_listed_on_the_table(graph):
 
 def test_foreign_key_edges_and_confidence(graph):
     fks = _pairs(graph, "foreign_key_to")
+    assert ("foreign_key_to", "audits", "users", "INFERRED") in fks               # tenant/ sub-folder, Schema::connection()
     assert ("foreign_key_to", "branches", "users", "EXTRACTED") in fks            # constrained('users')
     assert ("foreign_key_to", "staff_members", "branches", "EXTRACTED") in fks    # foreign()->references()->on()
     assert ("foreign_key_to", "branches", "clients", "INFERRED") in fks           # constrained(): plural of client
@@ -310,6 +321,19 @@ def test_form_request_rules_link_tables_enums_and_rules(graph):
     assert _edge(graph, "validates_table", ".rules()", "branches")["rules"] == ["unique"]
     assert _edge(graph, "validates_with", ".rules()", "BranchType")["rule_kind"] == "enum"
     assert _edge(graph, "validates_with", ".rules()", "ValidCode")["rule_kind"] == "custom_rule"
+
+
+def test_rules_built_in_variables_and_livewire_property(graph):
+    rows = {
+        (_label(s), _label(t), e["confidence"])
+        for e, s, t in _edges(graph, "validates_table")
+        if s["source_file"].endswith(("UpdateBranchRequest.php", "BranchForm.php"))
+    }
+    assert rows == {
+        (".rules()", "categories", "EXTRACTED"),       # Rule::exists inside $categoryRules
+        (".rules()", "tags", "EXTRACTED"),             # $rules['tag'] = '...|exists:tags,id'
+        ("BranchForm", "clients", "EXTRACTED"),         # Livewire `protected $rules` belongs to the class
+    }                                                   # 'exists:'.config(...) names no table
 
 
 def test_inline_validate_and_validator_make(graph):

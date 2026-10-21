@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from graphify.extractors.laravel.phpdecl import ClassView, find_method, return_exprs, walk
+from graphify.extractors.laravel.phpdecl import ClassView, find_method, property_default, return_exprs, walk
 from graphify.extractors.laravel.phpsrc import (
     PhpFile,
     args_of,
@@ -154,7 +154,9 @@ def _creation_args(node) -> list:
     return out
 
 
-def _visit(f: PhpFile, node, field: str | None, out: list[Hit]) -> None:
+def _visit(f: PhpFile, node, field: str | None, out: list[Hit], strong_only: bool = False) -> None:
+    """Rule hits of one rule expression. ``strong_only`` leaves out ``new MyRule`` (a ``new`` anywhere
+    in a method body is not necessarily a rule)."""
     if node is None:
         return
     t = node.type
@@ -182,7 +184,7 @@ def _visit(f: PhpFile, node, field: str | None, out: list[Hit]) -> None:
             enum = class_ref(f, args[0]) if args else None
             if enum:
                 out.append(Hit("enum", line_of(node), field, fqn=enum))
-        else:
+        elif not strong_only:
             out.append(Hit("rule", line_of(node), field, fqn=fqn))
         return
     call = _rule_facade_call(f, node)
@@ -256,15 +258,46 @@ def arrays_of(f: PhpFile, method) -> list:
     return arrays
 
 
+def _loose_hits(f: PhpFile, method) -> list[Hit]:
+    """Table / enum rules anywhere in a ``rules()`` body (an array built up in variables and merged
+    later never reaches a ``return``). Only the strong signals: ``exists:`` / ``unique:`` strings,
+    ``Rule::exists|unique|enum`` and ``new Enum``. The field name is unknown."""
+    out: list[Hit] = []
+    for n in walk(method):
+        parent = n.parent
+        if n.type in ("string", "encapsed_string", "binary_expression", "parenthesized_expression"):
+            if parent is not None and parent.type == "binary_expression":
+                continue                         # part of a larger `.` expression, read at the top
+            _visit(f, n, None, out, strong_only=True)
+        elif n.type in ("scoped_call_expression", "member_call_expression", "object_creation_expression"):
+            if parent is not None and parent.type == "member_call_expression" and (
+                parent.child_by_field_name("object") == n
+            ):
+                continue                         # the base of a chain: the outermost call is read
+            _visit(f, n, None, out, strong_only=True)
+    return out
+
+
 def rules_method_hits(f: PhpFile, cls: ClassView) -> list[tuple[Any, list[Hit]]]:
-    """``[(method node, hits)]`` for the class's ``rules()`` method."""
+    """``[(method node | None, hits)]`` for a class's ``rules()`` method and ``$rules`` property
+    (``None``: the property, owned by the class)."""
+    out: list[tuple[Any, list[Hit]]] = []
     m = find_method(f, cls, "rules")
-    if m is None:
-        return []
-    hits: list[Hit] = []
-    for arr in arrays_of(f, m):
-        _visit_rules_array(f, arr, hits)
-    return [(m, hits)] if hits else []
+    if m is not None:
+        hits: list[Hit] = []
+        for arr in arrays_of(f, m):
+            _visit_rules_array(f, arr, hits)
+        seen = {(h.kind, h.table, h.fqn, h.rule) for h in hits}
+        hits.extend(h for h in _loose_hits(f, m) if (h.kind, h.table, h.fqn, h.rule) not in seen)
+        if hits:
+            out.append((m, hits))
+    prop = property_default(f, cls, "rules")
+    if prop is not None and prop.type == "array_creation_expression":
+        hits = []
+        _visit_rules_array(f, prop, hits)
+        if hits:
+            out.append((None, hits))
+    return out
 
 
 def _facade_scope(f: PhpFile, call, names: frozenset[str]) -> bool:

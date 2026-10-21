@@ -39,7 +39,7 @@ from graphify.extractors.laravel.phpsrc import (
     str_value,
 )
 
-_MIGRATION_DIR = re.compile(r"(^|/)migrations/[^/]+\.php$")
+_MIGRATION_DIR = re.compile(r"(^|/)migrations/(?:[^/]+/)*[^/]+\.php$")   # also database/migrations/tenant/
 _SCHEMA_FACADES = frozenset({"illuminate\\support\\facades\\schema", "schema"})
 
 # Blueprint method -> column type for single-name column definitions.

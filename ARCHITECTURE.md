@@ -293,3 +293,50 @@ components, multi-file Livewire components, `Fortify::*View('name')`,
 partials included from a Livewire view (they get no owner), `module_path()`-style path
 helpers, a theme view that exists in two themes without a `.graphifyrc` choice, and a
 component name defined by both a class and a single-file component (ambiguous, no edge).
+
+The Laravel data layer is a third registry resolver, `laravel_data` (`laravel/data.py`, same
+gate and scan root; readers in `eloquent.py`, `migrations.py`, `validation.py`, `filament.py`,
+`inflect.py`). Which classes are Eloquent models, FormRequests or Filament resources comes from
+the resolved `inherits` edges (an in-corpus chain ending in an FQN-labelled external stub such
+as `Illuminate\Database\Eloquent\Model`, `Illuminate\Foundation\Auth\User`, `...\Relations\Pivot`);
+every class written in a body goes through `PhpFile.class_fqn` (`_php_fqn_from_raw`) and
+`SymbolIndex.resolve_class`, so a name that is not exactly one in-corpus declaration gets no edge.
+* Relations: a relation method (`return $this->hasMany(X::class, ...)`, first call on `$this`)
+  yields `eloquent_<snake type>` (`eloquent_has_one`, `_has_many`, `_belongs_to`, `_belongs_to_many`,
+  `_has_one_through`, `_has_many_through`, `_morph_one`, `_morph_many`, `_morph_to_many`,
+  `_morphed_by_many`; `morphTo` has no static target) from the relation method node to the related
+  class (`EXTRACTED`, `eloquent_type`, `method`, literal keys such as `foreign_key`, `pivot_table`),
+  `eloquent_through` / `eloquent_pivot` to the intermediate / `->using()` model, and the method node
+  gets `metadata.eloquent_relation`. The graph keeps one edge per node pair, so the model -> model
+  summary edge (same relation names) names the pair by its first relation in source order and lists the
+  others (an inverse `hasMany`, a through relation) in `also`; the method-level edges lose nothing.
+* `casts_to` model -> class for `$casts` / `casts()` entries `'attr' => X::class` (`attributes`);
+  primitives (`'datetime'`) are model metadata (`metadata.eloquent.casts`) only.
+* `uses_model` calling method / closure -> model for `Model::where()` style static calls whose
+  method no in-corpus model, ancestor or trait declares (`methods`); `self::`/`static::` and calls
+  the call resolver already binds are not repeated. Related Phase-0 `references_constant` edges on a
+  pair a typed edge covers are superseded (`_drop`), because the graph would keep only one of them.
+* Migrations: every `Schema::create|table|drop|dropIfExists|rename` in an `up()` of a
+  `migrations/*.php` file is replayed in file-name order onto one `table:<name>` node per table
+  (label = name, `metadata.kind == "db_table"` with `columns`, `foreign_keys`, `migrations`), contained by
+  the migration that creates it; `alters_table` from the others. `foreign_key_to` table -> table:
+  `references()->on()` / `constrained('t')` `EXTRACTED`, `constrained()` (plural of the column without
+  `_id`) and `foreignIdFor(X::class)` `INFERRED` (`via`). A non-literal table name, raw SQL and
+  composite keys are not modelled.
+* `maps_to_table` model -> table node: `protected $table` (own or in-corpus ancestor) `EXTRACTED`,
+  otherwise the naming convention `Str::plural(Str::snake(basename))` `INFERRED`, only when a migration
+  defines the table. No convention for abstract models, Pivots or a `getTable()` override. The
+  pluraliser (`inflect.py`) ports Doctrine's rule order; irregular words outside its lists are wrong,
+  which is why the convention edge is `INFERRED`.
+* Validation: in `rules()` of a FormRequest / Livewire component and in `->validate([...])`,
+  `Validator::make`, `validator()`: `'exists:t,col'`, `'unique:t'` (also `connection.table` and a model
+  FQCN), `Rule::exists|unique('t' | X::class)` -> `validates_table` to the table node (`fields`,
+  `rules`; the model route is `INFERRED` when the model's table is by convention); `Rule::enum(X::class)`,
+  `new Enum(X::class)` and `new MyRule(...)` -> `validates_with` to the in-corpus class (`rule_kind`).
+  A string cut by a variable is read up to the dynamic part; a table name it may have shortened is dropped.
+* Filament: a class reaching `Filament\Resources\Resource` -> `filament_resource_for` (its
+  `$model`), `filament_page` (`getPages()` entries, `Pages\ListX::route('/')` or `::class`, with `keys`
+  and `route`) and `filament_relation_manager` (`getRelations()`, also inside `RelationGroup::make`).
+Not modelled: relation methods in traits, relations built from variables or `$this->related()`,
+Livewire `#[Validate]` attributes, `Rule::when`/macro rules, Filament `getModel()` and cluster
+registration, `Schema` calls in non-`migrations/` files, and a table name stored in config.

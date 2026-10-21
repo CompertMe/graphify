@@ -78,6 +78,11 @@ RULES_OWNER_BASES = frozenset({
 })
 TABLE_PREFIX = "table:"
 _STATIC_SCOPE = re.compile(rb"([A-Za-z_][A-Za-z0-9_\\]*)\s*::")
+_USE_ALIAS = re.compile(rb"\bas\s+([A-Za-z_]\w*)")
+_RELATION_CALL = re.compile(
+    rb"\$this->(?:hasOne|hasMany|belongsTo|belongsToMany|hasOneThrough|hasManyThrough|morphOne|morphMany|"
+    rb"morphTo|morphToMany|morphedByMany)\s*\("
+)
 _SELF_SCOPES = frozenset({"self", "static", "parent"})
 
 
@@ -218,9 +223,12 @@ class DataPass:
         for e in self.all_edges:
             if e.get("relation") == "references_constant":
                 generic.setdefault((e.get("source", ""), e.get("target", "")), []).append(e)
-        for pair in self._superseded:
-            for e in generic.get(pair, []):
-                e["_drop"] = True
+        for src, tgt in self._superseded:
+            # Either direction: the graph is undirected, so a page's `references_constant` back to its
+            # resource would otherwise displace (or be displaced by) the typed edge on the same pair.
+            for pair in ((src, tgt), (tgt, src)):
+                for e in generic.get(pair, []):
+                    e["_drop"] = True
 
     def class_nid(self, fqn: str | None) -> str | None:
         return self.idx.resolve_class(fqn)
@@ -301,18 +309,19 @@ class DataPass:
                 continue
             wants_static = bool(self.models) and b"::" in raw
             wants_rules = b"ules" in raw or b"alidat" in raw
+            wants_relations = bool(_RELATION_CALL.search(raw))      # a model, or a trait the models use
             has_special = any(
                 n["id"] in self.models or self.graph.is_a(n["id"], filament.RESOURCE_BASES)
                 or self.graph.is_a(n["id"], RULES_OWNER_BASES)
                 for n in nodes
             )
-            if not (has_special or wants_static or wants_rules):
+            if not (has_special or wants_static or wants_rules or wants_relations):
                 continue
             f = self.load(rel)
             if f is None:
                 continue
             for n in nodes:
-                if n["id"] in self.models:
+                if n["id"] in self.models or wants_relations:
                     self.eloquent(rel, f, n)
                 if self.graph.is_a(n["id"], filament.RESOURCE_BASES):
                     self.filament(rel, f, n)
@@ -324,7 +333,8 @@ class DataPass:
                 self.call_site_rules(rel, f)
 
     def _mentions_model(self, raw: bytes) -> bool:
-        names = self.model_names
+        """Cheap prefilter: a ``Name::`` whose last segment is a model's name or a ``use ... as Alias``."""
+        names = self.model_names | {m.group(1).lower() for m in _USE_ALIAS.finditer(raw)}
         return any(m.group(1).rsplit(b"\\", 1)[-1].lower() in names for m in _STATIC_SCOPE.finditer(raw))
 
     # ── migrations ──────────────────────────────────────────────────────────
@@ -395,9 +405,13 @@ class DataPass:
         if view is None:
             return
         cid = node["id"]
+        if cid not in self.models and view.kind != "trait":
+            return
         model_meta: dict = {}
-        for r in eloquent.read_relations(f, view):
+        for r in eloquent.read_relations(f, view):       # a trait's relation methods too: the models `use` it
             self.relation(rel, f, cid, node, r)
+        if cid not in self.models:
+            return
         casts = eloquent.read_casts(f, view)
         if casts:
             model_meta["casts"] = {c.attribute: (c.fqn or c.primitive) for c in casts}
@@ -512,7 +526,8 @@ class DataPass:
         if view is None:
             return
         for method, hits in validation.rules_method_hits(f, view):
-            owner = self.owners.of(f, method.child_by_field_name("name") or method)
+            # rules(): the method node; the `$rules` property belongs to the class itself.
+            owner = self.owners.of(f, method.child_by_field_name("name") or method) if method is not None else node["id"]
             self.rule_edges(rel, f, owner, hits)
 
     def call_site_rules(self, rel: str, f: PhpFile) -> None:
