@@ -28,6 +28,7 @@ from .csharp_dispatch import resolve_csharp_interface_dispatch
 from .swift_dispatch import resolve_swift_protocol_dispatch
 from .pascal_resolution import resolve_pascal_inherited_calls
 from .markdown_resolution import MARKDOWN_MENTION_SUFFIXES, resolve_markdown_mentions
+from .extractors.laravel.data import DATA_RESOLVER as _LARAVEL_DATA_RESOLVER
 from .extractors.laravel import (
     LANGUAGE_RESOLVER as _LARAVEL_ROUTES_RESOLVER,
     WEB_RESOLVER as _LARAVEL_WEB_RESOLVER,
@@ -5939,6 +5940,8 @@ def _resolve_php_member_calls(
         ):
             type_def_nids.setdefault(class_key(node.get("label", "")), []).append(node["id"])
 
+    php_type_nids = {nid for nids in type_def_nids.values() for nid in nids}
+
     method_index: dict[tuple[str, str], set[str]] = {}
     enclosing_type: dict[str, str] = {}
     for edge in all_edges:
@@ -6013,6 +6016,14 @@ def _resolve_php_member_calls(
                 if len(type_defs) != 1:
                     continue
                 type_nid = type_defs[0]
+            elif not receiver.startswith("$") and "php_scope_nid" in raw_call:
+                # Bound by `_resolve_php_type_references` with PHP name rules (use
+                # alias / same namespace / leading `\`); empty = names no in-corpus
+                # type, so no edge (a same-named class elsewhere is a decoy).
+                scope_nid = raw_call["php_scope_nid"]
+                if not scope_nid or scope_nid not in php_type_nids:
+                    continue
+                type_nid = scope_nid
             elif not receiver.startswith("$"):
                 type_defs = type_def_nids.get(class_key(receiver), [])
                 if not type_defs:
@@ -7596,6 +7607,8 @@ register_language_resolver(
 register_language_resolver(_LARAVEL_ROUTES_RESOLVER)
 # Inertia page edges + props contract + route('name') links; needs the route nodes above.
 register_language_resolver(_LARAVEL_WEB_RESOLVER)
+# Eloquent relations / casts / model statics, migration tables, validation rules, Filament.
+register_language_resolver(_LARAVEL_DATA_RESOLVER)
 register_language_resolver(
     LanguageResolver("rust_self_member_calls", frozenset({".rs"}), _resolve_rust_self_member_calls)
 )
