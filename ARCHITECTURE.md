@@ -340,6 +340,11 @@ every class written in a body goes through `PhpFile.class_fqn` (`_php_fqn_from_r
   `rules`; the model route is `INFERRED` when the model's table is by convention); `Rule::enum(X::class)`,
   `new Enum(X::class)` and `new MyRule(...)` -> `validates_with` to the in-corpus class (`rule_kind`).
   A string cut by a variable is read up to the dynamic part; a table name it may have shortened is dropped.
+  Both branches of a ternary rule set (`'f' => $c ? [..] : [..]`) are read. `->validate($rules)` /
+  `Validator::make($data, $rules)` with a variable read the arrays assigned to it earlier in the same
+  function (`$rules = [..]`, `array_merge` of literal arrays, `$rules['field'] = ..`); a property
+  (`$this->rules`) or a call result gives nothing. A class that `implements`
+  `Maatwebsite\Excel\Concerns\WithValidation` owns its `rules()` like a form request.
 * Filament: a class reaching `Filament\Resources\Resource` -> `filament_resource_for` (its
   `$model`), `filament_page` (`getPages()` entries, `Pages\ListX::route('/')` or `::class`, with `keys`
   and `route`) and `filament_relation_manager` (`getRelations()`, also inside `RelationGroup::make`).
@@ -487,6 +492,14 @@ ordinary source-file ownership. A change to anything else (Markdown, JSON) and a
 project keep the exact changed-files-only behaviour. `tests/test_laravel_incremental.py` compares the
 incremental graph with a fresh full build. Not covered: a changed `lang/*.json` or `composer.json`
 alone (not code files, so the rebuild is skipped as before).
+
+**Cost of the Laravel passes.** Every pass walks the PHP trees it needs, so the walk is the cost.
+`phpsrc.typed_nodes(root, types)` lists the nodes of given types through tree-sitter's query engine
+(document order, an enclosing node before the nodes in it, identical to a filtering depth-first walk) and
+replaces the Python-level whole-tree walks (calls, class declarations, `use`/namespace headers,
+assignments, `Schema` calls). The remaining shared work is memoized for the run: a node's root-relative
+path and a file's namespace (`symbols.py`, cleared with the scan context). A PHP tree is not kept
+between passes (about 40x the source size, so a large app would hold gigabytes).
 
 **One edge per node pair.** The built graph keeps one edge per node pair, and the PHP extractor
 adds a plain `references_constant` for every `Foo::class` mention, so two facts about one pair

@@ -18,9 +18,11 @@ from graphify.extractors.laravel.phpsrc import (
     class_const_raw,
     line_of,
     str_value,
+    typed_nodes,
 )
 from graphify.extractors.laravel.views import iter_nodes
 
+_CALL_TYPES = frozenset({"function_call_expression", "scoped_call_expression", "member_call_expression"})
 TYPE_DECLS = frozenset({"class_declaration", "trait_declaration", "interface_declaration", "enum_declaration"})
 FACADE_NS = "illuminate\\support\\facades\\"
 
@@ -34,9 +36,7 @@ class ClassDecl:
 
 def class_decls(f: PhpFile) -> list[ClassDecl]:
     out: list[ClassDecl] = []
-    for n in iter_nodes(f.root):
-        if n.type not in TYPE_DECLS:
-            continue
+    for n in typed_nodes(f.root, TYPE_DECLS):
         name = n.child_by_field_name("name")
         if name is None:
             continue
@@ -398,12 +398,7 @@ def param_types(f: PhpFile, callable_node) -> dict[str, list[str]]:
 
 
 def iter_calls_in(root) -> Iterator:
-    stack = [root]
-    while stack:
-        n = stack.pop()
-        if n.type in ("function_call_expression", "scoped_call_expression", "member_call_expression"):
-            yield n
-        stack.extend(reversed(n.children))
+    yield from typed_nodes(root, _CALL_TYPES)
 
 
 __all__ = [

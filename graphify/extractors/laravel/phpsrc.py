@@ -55,6 +55,35 @@ def get_parser():
     return _parser
 
 
+_NS_TYPES = frozenset({"namespace_definition", "namespace_use_declaration"})
+_queries: dict[frozenset, Any] = {}
+
+
+def typed_nodes(root, types: frozenset[str]) -> list:
+    """Every node under ``root`` (``root`` included) whose type is in ``types``, in source order.
+
+    Same list a depth-first walk that filters on ``node.type`` yields, but the tree is scanned by
+    tree-sitter's query engine: a Python-level walk visits every node of the file (millions on a
+    large app) for the few hundred call or declaration nodes a pass wants. A node that is also an
+    ancestor of another match is listed before it, like the walk."""
+    query = _queries.get(types)
+    if query is None:
+        from tree_sitter import Query
+
+        parser = get_parser()
+        if parser is None:
+            return []
+        query = Query(parser.language, "[" + " ".join(f"({t})" for t in sorted(types)) + "] @n")
+        _queries[types] = query
+    from tree_sitter import QueryCursor
+
+    found = QueryCursor(query).captures(root).get("n", [])
+    # The engine groups captures by alternative, not by position: restore document order, an
+    # enclosing node (same start, later end) before the nodes inside it.
+    found.sort(key=lambda n: (n.start_byte, -n.end_byte))
+    return found
+
+
 @dataclass
 class Arg:
     name: str | None
@@ -125,13 +154,13 @@ def load_php_file(abs_path: Path, rel: str) -> PhpFile | None:
         if key:
             uses.setdefault(key, fqn)
 
-    def walk(n) -> None:
+    for n in typed_nodes(tree.root_node, _NS_TYPES):
         if n.type == "namespace_definition":
             for c in n.children:
                 if c.type == "namespace_name":
                     namespaces.append(f.text(c))
                     break
-        elif n.type == "namespace_use_declaration":
+        else:
             prefix = ""
             group = None
             for c in n.children:
@@ -145,11 +174,6 @@ def load_php_file(abs_path: Path, rel: str) -> PhpFile | None:
                 for c in group.children:
                     if c.type == "namespace_use_clause":
                         use_clause(c, prefix)
-            return
-        for child in n.children:
-            walk(child)
-
-    walk(tree.root_node)
     if len(set(namespaces)) > 1:
         f.ns = None
     else:

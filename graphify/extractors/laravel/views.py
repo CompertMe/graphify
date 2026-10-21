@@ -41,9 +41,12 @@ from graphify.extractors.laravel.phpsrc import (
     named,
     positional,
     str_value,
+    typed_nodes,
 )
 from graphify.extractors.laravel.viewconfig import LaravelViewOptions
 
+_ASSIGNMENTS = frozenset({"assignment_expression", "augmented_assignment_expression"})
+_REGISTRATION_NODES = frozenset({"function_definition", "member_call_expression", "scoped_call_expression"})
 BLADE = ".blade.php"
 _FACADES = {
     "view": frozenset({"Illuminate\\Support\\Facades\\View", "View"}),
@@ -139,9 +142,7 @@ def _single_assignment(f: PhpFile, var):
         return None
     name = f.text(var)
     found = []
-    for n in iter_nodes(scope):
-        if n.type not in ("assignment_expression", "augmented_assignment_expression"):
-            continue
+    for n in typed_nodes(scope, _ASSIGNMENTS):
         left = n.child_by_field_name("left")
         if left is None or left.type != "variable_name" or f.text(left) != name:
             continue
@@ -242,13 +243,11 @@ def _helper_of(f: PhpFile, fn) -> ViewHelper | None:
 
 
 def collect_registrations(f: PhpFile, reg: Registrations) -> None:
-    for n in iter_nodes(f.root):
+    for n in typed_nodes(f.root, _REGISTRATION_NODES):
         if n.type == "function_definition":
             helper = _helper_of(f, n)
             if helper is not None:
                 reg.helpers.setdefault(helper.name, helper)
-            continue
-        if n.type not in ("member_call_expression", "scoped_call_expression"):
             continue
         parts = _call_parts(f, n)
         if parts is None:

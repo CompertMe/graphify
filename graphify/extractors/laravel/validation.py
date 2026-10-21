@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from graphify.extractors.laravel.phpdecl import ClassView, find_method, property_default, return_exprs, walk
+from graphify.extractors.laravel.phpdecl import ClassView, find_method, property_default, return_exprs
 from graphify.extractors.laravel.phpsrc import (
     PhpFile,
     args_of,
@@ -35,8 +35,15 @@ from graphify.extractors.laravel.phpsrc import (
     line_of,
     positional,
     str_value,
+    typed_nodes,
 )
 
+_ASSIGN = frozenset({"assignment_expression"})
+_VALIDATE_CALLS = frozenset({"member_call_expression", "scoped_call_expression", "function_call_expression"})
+_LOOSE_NODES = frozenset({
+    "string", "encapsed_string", "binary_expression", "parenthesized_expression",
+    "scoped_call_expression", "member_call_expression", "object_creation_expression",
+})
 RULE_FACADES = frozenset({"illuminate\\validation\\rule"})
 ENUM_RULES = frozenset({"illuminate\\validation\\rules\\enum"})
 VALIDATOR_FACADES = frozenset({"illuminate\\support\\facades\\validator", "validator"})
@@ -253,9 +260,7 @@ def arrays_of(f: PhpFile, method) -> list:
     for e in return_exprs(method):
         take(e)
     if var_names:
-        for n in walk(method):
-            if n.type != "assignment_expression":
-                continue
+        for n in typed_nodes(method, _ASSIGN):
             left = n.child_by_field_name("left")
             right = n.child_by_field_name("right")
             if left is not None and left.type == "variable_name" and f.text(left) in var_names:
@@ -268,7 +273,7 @@ def _loose_hits(f: PhpFile, method) -> list[Hit]:
     later never reaches a ``return``). Only the strong signals: ``exists:`` / ``unique:`` strings,
     ``Rule::exists|unique|enum`` and ``new Enum``. The field name is unknown."""
     out: list[Hit] = []
-    for n in walk(method):
+    for n in typed_nodes(method, _LOOSE_NODES):
         parent = n.parent
         if n.type in ("string", "encapsed_string", "binary_expression", "parenthesized_expression"):
             if parent is not None and parent.type == "binary_expression":
@@ -316,7 +321,7 @@ def _facade_scope(f: PhpFile, call, names: frozenset[str]) -> bool:
 def call_site_hits(f: PhpFile) -> list[tuple[Any, list[Hit]]]:
     """``[(call node, hits)]`` for ``->validate([...])``, ``Validator::make(...)``, ``validator(...)``."""
     out: list[tuple[Any, list[Hit]]] = []
-    for n in walk(f.root):
+    for n in typed_nodes(f.root, _VALIDATE_CALLS):
         arr = None
         if n.type == "member_call_expression":
             name = n.child_by_field_name("name")
@@ -370,9 +375,7 @@ def _visit_variable_rules(f: PhpFile, call, var, out: list[Hit]) -> None:
     if scope is None:
         return
     name = f.text(var)
-    for a in walk(scope):
-        if a.type != "assignment_expression":
-            continue
+    for a in typed_nodes(scope, _ASSIGN):
         owner = _enclosing_function(a)
         if a.end_byte > call.start_byte or owner is None or owner.id != scope.id:
             continue

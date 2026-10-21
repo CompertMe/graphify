@@ -34,6 +34,7 @@ from graphify.extractors.laravel.phpsrc import (
     named,
     positional,
     str_value,
+    typed_nodes,
 )
 
 FACADE_NS = "Illuminate\\Support\\Facades\\"
@@ -41,6 +42,7 @@ _ALL_CALLS = frozenset({
     "function_call_expression", "scoped_call_expression",
     "member_call_expression", "nullsafe_member_call_expression",
 })
+_POLICY_NODES = frozenset({"property_element", "class_declaration"})
 _FUNCTIONS = CLOSURE_TYPES | {"method_declaration", "function_definition"}
 _BUILTIN_TYPES = frozenset({
     "array", "string", "int", "float", "bool", "mixed", "callable", "iterable", "object",
@@ -59,12 +61,7 @@ RESOURCE_ABILITIES = {
 
 def iter_all_calls(root) -> Iterator:
     """Every call expression under ``root`` (nullsafe ``?->`` included), in source order."""
-    stack = [root]
-    while stack:
-        node = stack.pop()
-        if node.type in _ALL_CALLS:
-            yield node
-        stack.extend(reversed(node.children))
+    yield from typed_nodes(root, _ALL_CALLS)
 
 
 def call_name(f: PhpFile, call) -> str | None:
@@ -441,9 +438,10 @@ def _scan_middleware_call(f: PhpFile, call, owners: Owners, facts: AuthzFacts) -
 
 
 def _scan_policy_properties(f: PhpFile, facts: AuthzFacts) -> None:
-    stack = [f.root]
-    while stack:
-        node = stack.pop()
+    # Only `$policies = [...]` and a `#[UsePolicy(...)]` attribute register anything here.
+    if b"$policies" not in f.src and b"UsePolicy" not in f.src:
+        return
+    for node in typed_nodes(f.root, _POLICY_NODES):
         if node.type == "property_element":
             var = next((c for c in node.children if c.type == "variable_name"), None)
             if var is not None and f.text(var) == "$policies":
@@ -453,10 +451,8 @@ def _scan_policy_properties(f: PhpFile, facts: AuthzFacts) -> None:
                     policy = class_ref(f, v)
                     if model and policy:
                         facts.policies.append(PolicyReg(model, policy, f.rel, line_of(node), "$policies"))
-            continue
-        if node.type == "class_declaration":
+        else:
             _scan_use_policy(f, node, facts)
-        stack.extend(reversed(node.children))
 
 
 def _scan_use_policy(f: PhpFile, cls, facts: AuthzFacts) -> None:

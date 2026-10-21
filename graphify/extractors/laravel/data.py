@@ -47,9 +47,9 @@ from pathlib import Path
 
 from graphify.extractors.laravel import eloquent, filament, migrations, validation
 from graphify.extractors.laravel.inflect import table_for_class
-from graphify.extractors.laravel.phpdecl import ClassView, class_views, walk
+from graphify.extractors.laravel.phpdecl import ClassView, class_views
 from graphify.extractors.laravel.phpsites import Owners
-from graphify.extractors.laravel.phpsrc import PhpFile, line_of, load_php_file
+from graphify.extractors.laravel.phpsrc import PhpFile, line_of, load_php_file, typed_nodes
 from graphify.extractors.laravel.symbols import SymbolIndex
 from graphify.extractors.laravel.webfiles import FileIndex
 from graphify.resolver_registry import LanguageResolver
@@ -85,6 +85,7 @@ _RELATION_CALL = re.compile(
     rb"morphTo|morphToMany|morphedByMany)\s*\("
 )
 _SELF_SCOPES = frozenset({"self", "static", "parent"})
+_SCOPED_CALL = frozenset({"scoped_call_expression"})
 
 
 def table_id(name: str) -> str:
@@ -518,9 +519,7 @@ class DataPass:
             self.supersede(src, tgt)
 
     def statics(self, rel: str, f: PhpFile) -> None:
-        for n in walk(f.root):
-            if n.type != "scoped_call_expression":
-                continue
+        for n in typed_nodes(f.root, _SCOPED_CALL):
             scope = n.child_by_field_name("scope")
             name = n.child_by_field_name("name")
             if scope is None or name is None or scope.type not in ("name", "qualified_name"):

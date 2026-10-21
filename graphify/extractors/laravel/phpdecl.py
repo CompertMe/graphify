@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterator
 
-from graphify.extractors.laravel.phpsrc import CLOSURE_TYPES, PhpFile
+from graphify.extractors.laravel.phpsrc import CLOSURE_TYPES, PhpFile, typed_nodes
 
 _TYPE_KINDS = {
     "class_declaration": "class",
@@ -18,6 +18,7 @@ _TYPE_KINDS = {
     "enum_declaration": "enum",
     "interface_declaration": "interface",
 }
+_TYPE_NODES = frozenset(_TYPE_KINDS)
 _FUNCTION_BOUNDARY = CLOSURE_TYPES | {"function_definition", "method_declaration", "anonymous_class", "class_declaration"}
 
 
@@ -47,10 +48,8 @@ def walk(root) -> Iterator:
 def class_views(f: PhpFile) -> list[ClassView]:
     """Every named class / trait / enum / interface declared in the file."""
     out: list[ClassView] = []
-    for n in walk(f.root):
-        kind = _TYPE_KINDS.get(n.type)
-        if kind is None:
-            continue
+    for n in typed_nodes(f.root, _TYPE_NODES):
+        kind = _TYPE_KINDS[n.type]
         name_node = n.child_by_field_name("name")
         if name_node is None:
             continue

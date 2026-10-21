@@ -25,9 +25,14 @@ from graphify.extractors.laravel.phpsrc import (
     named,
     positional,
     str_value,
+    typed_nodes,
 )
-from graphify.extractors.laravel.views import _FACADES, ViewHelper, iter_nodes
+from graphify.extractors.laravel.views import _FACADES, ViewHelper
 
+_CALL_SITES = frozenset({
+    "function_call_expression", "scoped_call_expression", "member_call_expression",
+    "object_creation_expression", "property_declaration",
+})
 _CONTENT = "Illuminate\\Mail\\Mailables\\Content"
 _CLASS_LIKE = ("class_declaration", "trait_declaration", "enum_declaration", "interface_declaration")
 _MEMBER_NAMES = frozenset({"view", "markdown", "loadview", "layout"})  # layout: Livewire's ->layout('x')
@@ -114,7 +119,7 @@ def find_view_calls(f: PhpFile, helpers: dict[str, ViewHelper]) -> list[ViewCall
         if names:
             calls.append(ViewCall(line_of(node), form, names, owners_of(f, node)))
 
-    for n in iter_nodes(f.root):
+    for n in typed_nodes(f.root, _CALL_SITES):
         t = n.type
         if t == "function_call_expression":
             fn = n.child_by_field_name("function")

@@ -28,7 +28,7 @@ from graphify.extractors.laravel.middleware import build_config
 from graphify.extractors.laravel.phpsrc import PhpFile, load_php_file
 from graphify.extractors.laravel.project import is_laravel_project
 from graphify.extractors.laravel.routes import Ctx, RouteWalker
-from graphify.extractors.laravel.symbols import SymbolIndex
+from graphify.extractors.laravel.symbols import SymbolIndex, clear_memos
 from graphify.extractors.laravel.viewpass import run_view_passes
 from graphify.resolver_registry import LanguageResolver
 
@@ -56,6 +56,7 @@ def set_scan_context(root: Path | str | None) -> None:
 
 def clear_scan_context() -> None:
     set_scan_context(None)
+    clear_memos()
 
 
 def resolve_laravel_routes(per_file: list, all_nodes: list[dict], all_edges: list[dict]) -> None:

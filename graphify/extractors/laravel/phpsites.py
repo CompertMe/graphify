@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Iterator
 
-from graphify.extractors.laravel.phpsrc import CLOSURE_TYPES, PhpFile, line_of
+from graphify.extractors.laravel.phpsrc import CLOSURE_TYPES, PhpFile, line_of, typed_nodes
 from graphify.extractors.laravel.symbols import SymbolIndex
 from graphify.extractors.laravel.webfiles import FileIndex
 
@@ -13,12 +13,7 @@ _TYPES = frozenset({"class_declaration", "trait_declaration", "enum_declaration"
 
 def iter_calls(root) -> Iterator:
     """Every call expression under ``root``, in source order."""
-    stack = [root]
-    while stack:
-        node = stack.pop()
-        if node.type in _CALLS:
-            yield node
-        stack.extend(reversed(node.children))
+    yield from typed_nodes(root, _CALLS)
 
 
 def function_name(f: PhpFile, call) -> str | None:

@@ -21,6 +21,40 @@ _PHP_SUFFIXES = (".php",)
 _CLOSURE_LABEL = re.compile(r"^(?:\{closure#\d+\}|[A-Z]+ \S*)\(\)$")
 
 
+# Each Laravel pass builds its own SymbolIndex over the same nodes: what a node's path or a file's
+# namespace turns into is computed once per run, not once per pass.
+_REL_MEMO: dict[tuple[str, str], str] = {}
+_NS_MEMO: dict[tuple[str, int, int], str | None] = {}
+
+
+def clear_memos() -> None:
+    _REL_MEMO.clear()
+    _NS_MEMO.clear()
+
+
+def _relativize(root: Path, source_file: str) -> str:
+    p = Path(source_file)
+    out = p.as_posix()
+    if p.is_absolute():
+        try:
+            out = p.resolve().relative_to(root).as_posix()
+        except (OSError, ValueError):
+            out = p.as_posix()
+    return out
+
+
+def _file_namespace(parser, path: Path) -> str | None:
+    """``_php_file_namespace`` memoized on the file's identity (path hash, size, mtime)."""
+    try:
+        st = path.stat()
+        key = (str(path), st.st_size, st.st_mtime_ns)
+    except OSError:
+        return _php_file_namespace(parser, path)
+    if key not in _NS_MEMO:
+        _NS_MEMO[key] = _php_file_namespace(parser, path)
+    return _NS_MEMO[key]
+
+
 def _loc_line(loc) -> int | None:
     if isinstance(loc, str) and loc[:1] == "L" and loc[1:].isdigit():
         return int(loc[1:])
@@ -84,13 +118,11 @@ class SymbolIndex:
         cached = self._rel_cache.get(source_file)
         if cached is not None:
             return cached
-        p = Path(source_file)
-        out = p.as_posix()
-        if p.is_absolute():
-            try:
-                out = p.resolve().relative_to(self.root).as_posix()
-            except (OSError, ValueError):
-                out = p.as_posix()
+        key = (str(self.root), source_file)
+        out = _REL_MEMO.get(key)
+        if out is None:
+            out = _relativize(self.root, source_file)
+            _REL_MEMO[key] = out
         self._rel_cache[source_file] = out
         return out
 
@@ -101,7 +133,7 @@ class SymbolIndex:
         if rel not in self._ns_cache:
             parser = get_parser()
             self._ns_cache[rel] = (
-                _php_file_namespace(parser, self.root / rel) if parser is not None else None
+                _file_namespace(parser, self.root / rel) if parser is not None else None
             )
         return self._ns_cache[rel]
 

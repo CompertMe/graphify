@@ -17,8 +17,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from graphify.extractors.laravel.phpsrc import PhpFile, line_of
-from graphify.extractors.laravel.views import iter_nodes, kebab
+from graphify.extractors.laravel.phpsrc import PhpFile, line_of, typed_nodes
+from graphify.extractors.laravel.views import kebab
+
+_CLASS_DECL = frozenset({"class_declaration"})
+_ANON_CLASS = frozenset({"anonymous_class"})
 
 LIVEWIRE_BASES = frozenset({"Livewire\\Component", "Livewire\\Volt\\Component"})
 DEFAULT_CLASS_NAMESPACES = ("App\\Livewire", "App\\Http\\Livewire")
@@ -40,9 +43,7 @@ def read_classes(f: PhpFile) -> list[ClassDecl]:
     if f.ns is None:
         return []
     out: list[ClassDecl] = []
-    for n in iter_nodes(f.root):
-        if n.type != "class_declaration":
-            continue
+    for n in typed_nodes(f.root, _CLASS_DECL):
         name_node = n.child_by_field_name("name")
         if name_node is None:
             continue
@@ -117,9 +118,7 @@ def sfc_name(rel: str) -> str | None:
 def read_sfc(f: PhpFile) -> Sfc | None:
     """The ``new class extends Component { ... }`` of a single-file component, else None."""
     found: list = []
-    for n in iter_nodes(f.root):
-        if n.type != "anonymous_class":
-            continue
+    for n in typed_nodes(f.root, _ANON_CLASS):
         base = next((c for c in n.children if c.type == "base_clause"), None)
         ref = next((x for x in base.children if x.type in ("name", "qualified_name")), None) if base else None
         if ref is not None and f.class_fqn(f.text(ref)) in LIVEWIRE_BASES:

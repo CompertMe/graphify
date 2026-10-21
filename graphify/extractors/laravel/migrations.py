@@ -27,7 +27,6 @@ import re
 from dataclasses import dataclass, field
 
 from graphify.extractors.laravel.inflect import plural, snake
-from graphify.extractors.laravel.phpdecl import walk
 from graphify.extractors.laravel.phpsrc import (
     CLOSURE_TYPES,
     Arg,
@@ -37,7 +36,11 @@ from graphify.extractors.laravel.phpsrc import (
     line_of,
     positional,
     str_value,
+    typed_nodes,
 )
+
+_EXPR_STATEMENT = frozenset({"expression_statement"})
+_SCHEMA_CALLS = frozenset({"scoped_call_expression", "member_call_expression"})
 
 _MIGRATION_DIR = re.compile(r"(^|/)migrations/(?:[^/]+/)*[^/]+\.php$")   # also database/migrations/tenant/
 _SCHEMA_FACADES = frozenset({"illuminate\\support\\facades\\schema", "schema"})
@@ -247,9 +250,7 @@ class _Replay:
         )
         if body is None:
             return
-        for n in walk(body):
-            if n.type != "expression_statement":
-                continue
+        for n in typed_nodes(body, _EXPR_STATEMENT):
             expr = next((c for c in n.children if c.is_named), None)
             if expr is None or expr.type != "member_call_expression":
                 continue
@@ -448,9 +449,7 @@ def _model_fk_column(model_fqn: str) -> str:
 def schema_ops(f: PhpFile):
     """``(kind, table, line, closure | None, extra)`` of every Schema call in an ``up()`` method."""
     ops = []
-    for n in walk(f.root):
-        if n.type not in ("scoped_call_expression", "member_call_expression"):
-            continue
+    for n in typed_nodes(f.root, _SCHEMA_CALLS):
         ch = _chain(f, n)
         if ch is None:
             continue

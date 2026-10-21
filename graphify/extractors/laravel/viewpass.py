@@ -49,7 +49,7 @@ from graphify.extractors.laravel.livewire import (
     read_classes,
     read_sfc,
 )
-from graphify.extractors.laravel.phpsrc import PhpFile, array_items, load_php_file, path_value, str_value
+from graphify.extractors.laravel.phpsrc import PhpFile, array_items, load_php_file, path_value, str_value, typed_nodes
 from graphify.extractors.laravel.symbols import SymbolIndex, _loc_line
 from graphify.extractors.laravel.viewcalls import ViewCall, find_view_calls
 from graphify.extractors.laravel.viewconfig import load_view_options
@@ -59,9 +59,10 @@ from graphify.extractors.laravel.views import (
     ViewHelper,
     ViewResolver,
     collect_registrations,
-    iter_nodes,
     studly,
 )
+
+_RETURNS = frozenset({"return_statement"})
 
 ROUTE_KIND = "laravel_route"
 _REG_PREFILTER = re.compile(
@@ -114,15 +115,14 @@ def _read(root: Path, rel: str) -> bytes | None:
 
 def _config_roots(f: PhpFile) -> list[str] | None:
     """``paths`` of ``config/view.php`` when every entry is a literal path."""
-    for n in iter_nodes(f.root):
-        if n.type == "return_statement":
-            expr = next((c for c in n.children if c.is_named), None)
-            for k, v in array_items(expr) or []:
-                if k is not None and str_value(f, k) == "paths":
-                    items = array_items(v)
-                    paths = [path_value(f, x) for _k, x in items or []]
-                    return paths if paths and all(p for p in paths) else None  # type: ignore[return-value]
-            return None
+    for n in typed_nodes(f.root, _RETURNS):
+        expr = next((c for c in n.children if c.is_named), None)
+        for k, v in array_items(expr) or []:
+            if k is not None and str_value(f, k) == "paths":
+                items = array_items(v)
+                paths = [path_value(f, x) for _k, x in items or []]
+                return paths if paths and all(p for p in paths) else None  # type: ignore[return-value]
+        return None
     return None
 
 
