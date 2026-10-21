@@ -75,6 +75,7 @@ RULES_OWNER_BASES = frozenset({
     "livewire\\component",
     "livewire\\form",
     "livewire\\volt\\component",
+    "maatwebsite\\excel\\concerns\\withvalidation",     # an import class: `implements WithValidation`
 })
 TABLE_PREFIX = "table:"
 _STATIC_SCOPE = re.compile(rb"([A-Za-z_][A-Za-z0-9_\\]*)\s*::")
@@ -91,7 +92,7 @@ def table_id(name: str) -> str:
 
 
 class ClassGraph:
-    """Which in-corpus classes reach which framework base, read from the resolved ``inherits`` edges.
+    """Which in-corpus classes reach which framework base, read from the resolved ``inherits`` and ``implements`` edges.
 
     ``_resolve_php_type_references`` already tied each ``extends`` to the in-corpus class or to
     an FQN-labelled external stub, by the PHP name rules; nothing is resolved a second time here.
@@ -105,7 +106,7 @@ class ClassGraph:
         }
         self.parents: dict[str, list[str]] = {}
         for e in all_edges:
-            if e.get("relation") == "inherits" and e.get("source") and e.get("target"):
+            if e.get("relation") in ("inherits", "implements") and e.get("source") and e.get("target"):
                 self.parents.setdefault(e["source"], []).append(e["target"])
         self._memo: dict[str, frozenset[str]] = {}
 

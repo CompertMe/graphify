@@ -172,6 +172,11 @@ def _visit(f: PhpFile, node, field: str | None, out: list[Hit], strong_only: boo
         if pre is not None:
             out.extend(_string_rules(pre[0], pre[1], line_of(node), field))
         return
+    if t == "conditional_expression":
+        # `cond ? [rules...] : [rules...]` (or `?:`): each branch is a rule set the field can get.
+        for branch in (node.child_by_field_name("body"), node.child_by_field_name("alternative")):
+            _visit(f, branch, field, out, strong_only)
+        return
     if t == "object_creation_expression":
         named = [c for c in node.children if c.type in ("name", "qualified_name")]
         if not named:
@@ -333,10 +338,63 @@ def call_site_hits(f: PhpFile) -> list[tuple[Any, list[Hit]]]:
             pos = positional(args_of(n))
             if fn is not None and f.text(fn).lstrip("\\").lower() == "validator" and len(pos) > 1:
                 arr = pos[1].node
-        if arr is None or arr.type != "array_creation_expression":
+        if arr is None:
             continue
         hits: list[Hit] = []
-        _visit_rules_array(f, arr, hits)
+        if arr.type == "array_creation_expression":
+            _visit_rules_array(f, arr, hits)
+        elif arr.type == "variable_name":
+            _visit_variable_rules(f, n, arr, hits)
+        else:
+            continue
         if hits:
             out.append((n, hits))
     return out
+
+
+_FUNCTION_LIKE = frozenset({"method_declaration", "function_definition", "anonymous_function", "arrow_function"})
+
+
+def _enclosing_function(node):
+    cur = node.parent
+    while cur is not None and cur.type not in _FUNCTION_LIKE:
+        cur = cur.parent
+    return cur
+
+
+def _visit_variable_rules(f: PhpFile, call, var, out: list[Hit]) -> None:
+    """Rules of ``$rules`` passed to ``->validate($rules)`` / ``Validator::make($data, $rules)``: the
+    arrays assigned to it (``$rules = [...]``, ``array_merge`` of literal arrays, ``$rules['field'] = ...``)
+    earlier in the same function. Nothing from another function, a property, or a call result."""
+    scope = _enclosing_function(call)
+    if scope is None:
+        return
+    name = f.text(var)
+    for a in walk(scope):
+        if a.type != "assignment_expression":
+            continue
+        owner = _enclosing_function(a)
+        if a.end_byte > call.start_byte or owner is None or owner.id != scope.id:
+            continue
+        left, right = a.child_by_field_name("left"), a.child_by_field_name("right")
+        if left is None or right is None:
+            continue
+        if left.type == "variable_name" and f.text(left) == name:
+            for arr in _literal_arrays(f, right):
+                _visit_rules_array(f, arr, out)
+        elif left.type == "subscript_expression":
+            parts = [c for c in left.children if c.is_named]
+            if parts and parts[0].type == "variable_name" and f.text(parts[0]) == name:
+                key = str_value(f, parts[1]) if len(parts) > 1 else None
+                _visit(f, right, key, out)
+
+
+def _literal_arrays(f: PhpFile, expr) -> list:
+    """The array literals an expression is made of: itself, or the literal arguments of ``array_merge``."""
+    if expr.type == "array_creation_expression":
+        return [expr]
+    if expr.type == "function_call_expression":
+        fn = expr.child_by_field_name("function")
+        if fn is not None and f.text(fn).lstrip("\\").lower() == "array_merge":
+            return [a.node for a in positional(args_of(expr)) if a.node.type == "array_creation_expression"]
+    return []

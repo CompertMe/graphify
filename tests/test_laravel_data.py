@@ -368,6 +368,28 @@ def test_inline_validate_and_validator_make(graph):
     }
 
 
+def test_rules_in_ternary_branches_and_in_a_variable_passed_to_validate(graph):
+    rows = {
+        (_label(s), _label(t), e["confidence"])
+        for e, s, t in _edges(graph, "validates_table")
+        if s["source_file"].endswith("ProfileController.php")
+    }
+    assert rows == {
+        (".update()", "users", "EXTRACTED"),       # 'email' => $strict ? [.., Rule::unique('users')] : [..]
+        (".notify()", "clients", "EXTRACTED"),     # $rules['client_id'] = [..'exists:clients,id']; validate($rules)
+        (".unrelated()", "branches", "EXTRACTED"), # validate($other): the $rules array's 'tags' is not passed
+    }                                              # validate($this->rules) / validate($request->rules()): nothing
+
+
+def test_excel_import_rules_belong_to_the_import_class(graph):
+    rows = {
+        (_label(s), _label(t))
+        for e, s, t in _edges(graph, "validates_table")
+        if s["source_file"].endswith("BranchImport.php")
+    }
+    assert rows == {(".rules()", "clients")}           # `implements WithValidation`
+
+
 def test_unknown_or_dynamic_tables_are_skipped(graph):
     tables = {_label(t) for _e, _s, t in _edges(graph, "validates_table")}
     assert "ghosts" not in tables                        # no migration creates it
