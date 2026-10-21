@@ -28,6 +28,7 @@ from .csharp_dispatch import resolve_csharp_interface_dispatch
 from .swift_dispatch import resolve_swift_protocol_dispatch
 from .pascal_resolution import resolve_pascal_inherited_calls
 from .markdown_resolution import MARKDOWN_MENTION_SUFFIXES, resolve_markdown_mentions
+from .extractors.laravel.authzkeys import AUTHZ_KEYS_RESOLVER as _LARAVEL_AUTHZ_KEYS_RESOLVER
 from .extractors.laravel.data import DATA_RESOLVER as _LARAVEL_DATA_RESOLVER
 from .extractors.laravel import (
     LANGUAGE_RESOLVER as _LARAVEL_ROUTES_RESOLVER,
@@ -7612,6 +7613,8 @@ register_language_resolver(_LARAVEL_WEB_RESOLVER)
 register_language_resolver(_LARAVEL_DATA_RESOLVER)
 # Commands / scheduler / jobs / events / listeners / observers / container bindings.
 register_language_resolver(_LARAVEL_RUNTIME_RESOLVER)
+# Gate/policy abilities, config keys and translation keys; reads the route nodes above.
+register_language_resolver(_LARAVEL_AUTHZ_KEYS_RESOLVER)
 register_language_resolver(
     LanguageResolver("rust_self_member_calls", frozenset({".rs"}), _resolve_rust_self_member_calls)
 )

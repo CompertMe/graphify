@@ -294,7 +294,7 @@ partials included from a Livewire view (they get no owner), `module_path()`-styl
 helpers, a theme view that exists in two themes without a `.graphifyrc` choice, and a
 component name defined by both a class and a single-file component (ambiguous, no edge).
 
-The Laravel data layer is a third registry resolver, `laravel_data` (`laravel/data.py`, same
+The Laravel data layer is a registry resolver (runs after `laravel_web`), `laravel_data` (`laravel/data.py`, same
 gate and scan root; readers in `eloquent.py`, `migrations.py`, `validation.py`, `filament.py`,
 `inflect.py`). Which classes are Eloquent models, FormRequests or Filament resources comes from
 the resolved `inherits` edges (an in-corpus chain ending in an FQN-labelled external stub such
@@ -343,8 +343,8 @@ Livewire `#[Validate]` attributes, `Rule::when`/macro rules, Filament `getModel(
 registration, `Schema` calls in non-`migrations/` files, and a table name stored in config.
 
 Laravel runtime wiring (`laravel/runtime.py`, `console.py`, `dispatch.py`, `container.py`,
-helpers in `phpread.py`; a third registry resolver, `laravel_runtime`, same gate, runs after
-`laravel_web`) models what the framework connects at run time. Class names go through
+helpers in `phpread.py`; registry resolver `laravel_runtime`, same gate, runs after
+`laravel_data`) models what the framework connects at run time. Class names go through
 `PhpFile.class_fqn` (`_php_fqn_from_raw`) and `SymbolIndex.resolve_class`; whether a class is a
 job, an event or a command is read from its own source (`extends` / `implements` / trait
 `use`, resolved the same way), never from the graph's `inherits` edges, so an incremental
@@ -405,3 +405,85 @@ frequencies the cron table does not know (the entry keeps `frequency`, no `cron`
 `Artisan::call(X::class)`, `$aliases` of a command, and resolving a call on an interface-typed
 property to the bound concrete method (the typed-receiver edge still points at the contract; the
 `binds` / `facade_for` edges are what link it to the concrete class).
+
+Laravel authorization and keys (`laravel/authz.py`, `keys.py`, driven by `authzkeys.py`;
+registry resolver `laravel_authz_keys`, same gate, runs after `laravel_web` (and last of the Laravel passes) because it reads the route
+nodes). Nodes: `laravel_ability` (label `ability:create-branches`, id = slug + hash of the name),
+`laravel_config_key` (`config:app.name`), `laravel_translation_key` (`lang:messages.welcome`).
+- **Abilities.** A node exists for a literal `Gate::define('x', ...)` (also `Gate::resource`,
+  which defines `res.view` etc. for the policy methods that exist) and for a name some check uses that
+  equals the string value of exactly one in-corpus enum case (spatie-style `PermissionEnum`; the link
+  ability -> case is `references_constant`, `INFERRED`, rule in the edge). `Gate::define($dynamic, ..)`
+  and abilities nothing defines get no node. `handled_by` (`EXTRACTED`) goes to the closure, the
+  `[C::class, 'm']` / `'C@m'` / invokable method; a closure the extractor has no node for gets none.
+  `checks_ability` (`EXTRACTED`, the name is written in the source) goes from the enclosing method /
+  closure (the file for Blade) to the ability for `Gate::allows|denies|check|authorize|inspect|any|none`
+  (also through `Gate::forUser()`), `->can|cannot|cant|canAny()` on any non-`Route` receiver,
+  `$this->authorize()`, `$this->middleware('can:x')` and Blade `@can|@cannot|@canany|@elsecan` /
+  `->can()` text; from a route node for the `can:` entries of its effective middleware (`can:x`,
+  `->can('x')`). The argument may be a literal, `Enum::CASE->value` or `Enum::CASE`. `Gate`, `Config` and
+  `Lang` count only when the written name resolves (PHP name rules) to the Laravel facade or the global
+  alias.
+- **Policies.** `policy_for` (policy class -> model): `Gate::policy(M::class, P::class)`, the
+  `$policies` array and `#[UsePolicy(P::class)]` are `EXTRACTED` (two different policies for one model
+  = none); Laravel's `guessPolicyName` convention (deepest `...\Policies\XPolicy` that exists) is
+  `INFERRED`. When a check names the model statically (`X::class`, `new X`, a typed parameter of the
+  enclosing function; Blade only a qualified `Fq\X::class`; route `can:ability,Fq\X`) and the policy
+  declares (or inherits) the ability as a method, `checks_ability` goes to that policy method
+  (`INFERRED`, `via` = how the policy was found) instead of an ability node. An unknown model, a model
+  without a policy or a missing method gives nothing.
+- **Config keys.** `config/**/*.php` and files registered with `$this->mergeConfigFrom(literal path,
+  'key')` give one node per literal leaf (`app.name`), contained by the file; a list (no string keys), or
+  an array nested deeper than 4 levels, is a leaf; numeric/computed keys are skipped; `env('X', d)`
+  names go to `metadata.env` / `env_default`. `config('a.b')`, `config([..])` (`access: set`),
+  `Config::get|string|...`, `config()->get()`, `app('config')->get()` and Blade `config('a.b')` give
+  `reads_config`: `EXTRACTED` to the exact leaf, `INFERRED` (`resolved_as: parent`) to the nearest leaf
+  above the key (`config('app.providers.0')`), `INFERRED` (`resolved_as: file`) to the config file for
+  a key naming a whole branch of one file. Two files defining one key = every definition, `ambiguous`.
+  One edge per (usage, key): repeated reads collapse onto the first.
+- **Translation keys.** `{lang,resources/lang}/<locale>/<group>.php` (nested arrays to `group.a.b`)
+  and `loadTranslationsFrom(literal path, 'ns')` (`ns::group.key`) give one node per key across all
+  locales (`metadata.locales`, `missing_locales`; source file = the `en` file, else the first locale),
+  JSON lang files (`lang/<locale>.json`) one node per string. A key gets a node only when some usage
+  reads it: defining every string added +40% nodes on two of the six measured apps (the
+  lang files hold more strings than the code reads), so unused keys stay out of the graph (the
+  pass logs `translation_keys_defined` / `translation_keys_used`). `__()`, `trans()`, `trans_choice()`,
+  `Lang::get|choice|has`, Blade `@lang` give `uses_translation` (`EXTRACTED`); JSON keys win over
+  `group.key` as in Laravel. A `group.key`-shaped name no file defines is not linked; the usage file
+  records it in `metadata.missing_translation_keys` (and a count; free text such as `__('Save')` is just a
+  default-locale string and is not reported). Keys of an array branch (`__('messages.errors')`) are not
+  missing and get no edge.
+- Edges and nodes are emitted for files extracted in this run, like the route pass; the indexes read every
+  file. Not modelled: `Gate::before/after`, `authorizeResource`, `permission:`/`role:` middleware
+  (spatie), abilities from `$user->hasPermissionTo()`, class constants as ability names, a model passed
+  through a property or a call, `lang/vendor/` overrides, JSON translations of package paths,
+  `module_path()` / `config_path()` style paths in `mergeConfigFrom`, `config()` keys built at runtime,
+  config values returned by `array_merge(...)` and Vue/JS `$t()` calls.
+
+**Final order of the Laravel passes.** `laravel_routes` (route nodes, then the view/Blade/Livewire
+pass inside it) -> `laravel_web` -> `laravel_data` -> `laravel_runtime` -> `laravel_authz_keys`
+(`extract.py` registration order). Only `laravel_web` and `laravel_authz_keys` read the route
+nodes, so they must come after the routes; `laravel_data` and `laravel_runtime` read class and
+method nodes plus source files and are independent of each other and of the authz pass. They never
+emit the same relation, with one overlap: `laravel_authz_keys` links an ability to an enum case with
+`references_constant`, a pair neither of the others touches.
+
+**One edge per node pair.** The built graph keeps one edge per node pair, and the PHP extractor
+adds a plain `references_constant` for every `Foo::class` mention, so two facts about one pair
+would otherwise be decided by edge sort order (relation name). Two places handle it, and they
+agree on the rule "the wiring edge stays, the plain mention is noted, nothing is lost":
+
+- At extraction, `laravel_data` marks a same-direction `references_constant` that a typed
+  `eloquent_*` / `uses_model` / validation / Filament edge covers with `_drop` (it carries the
+  mention's line already), and its model -> model summary edge names a pair by its first relation
+  and lists the others in `also`.
+- In `build_from_json` (`build.py`), `_outranks_class_mention` covers every wiring relation:
+  the runtime ones (`schedules`, `invokes_command`, `dispatches`, `dispatches_event`, `notifies`,
+  `sends_mail`, `listens_to`, `observes`, `binds`, `facade_for`) and the data ones (`eloquent_*`,
+  `filament_*`, `casts_to`, `uses_model`, `maps_to_table`, `foreign_key_to`, `validates_table`,
+  `validates_with`). Against `references_constant` on the same pair - in either direction and
+  whichever arrives first - the wiring edge is kept and `references_constant` is added to its
+  `also_relations`. A `binds` edge likewise beats `implements` / `inherits` / `mixes_in` on its
+  pair and records the type link in `also_relations`. This covers what extraction cannot: the
+  reverse direction (`Branch` mentions `Client::class` while `Client` -> `Branch` is
+  `eloquent_has_many`), and the runtime edges, which the data pass does not see.
