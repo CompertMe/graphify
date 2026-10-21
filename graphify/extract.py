@@ -2096,6 +2096,37 @@ def _normalize_ts_export_type_star(source: bytes) -> bytes | None:
     return bytes(masked)
 
 
+_JS_SPLIT_FROM_RE = re.compile(
+    rb"""(?m)^([ \t]*\}[ \t]*)(\r?\n)([ \t]*)(from[ \t]*(?:'[^'\n]*'|"[^"\n]*"))"""
+)
+
+
+def _normalize_js_split_from_clause(source: bytes) -> bytes | None:
+    """Pull a ``from '...'`` clause that starts the line after a closing ``}`` up.
+
+    ``export {\\n  default as Tabs\\n}\\nfrom './Tabs.vue'`` (the layout some
+    generators and formatters emit) is valid JavaScript, but tree-sitter-javascript
+    and tree-sitter-typescript end the ``export``/``import`` statement at the
+    ``}``: the clause becomes two stray expression statements, so the module
+    string is never seen and the barrel file gets no import/re-export edge at
+    all. A line holding only ``}`` followed by a line starting ``from '...'`` can
+    only be that statement (``from 'x'`` is a syntax error anywhere else), so the
+    clause is moved onto the ``}`` line. The rewrite is byte-for-byte the same
+    length and keeps every line break count, so offsets and line numbers hold.
+    """
+    if b"from" not in source:
+        return None
+
+    def _join(m: re.Match) -> bytes:
+        head, newline, indent, clause = m.groups()
+        sep = b" " if indent else b""
+        pad = b" " * (len(indent) - len(sep))
+        return head + sep + clause + pad + newline
+
+    out = _JS_SPLIT_FROM_RE.sub(_join, source)
+    return out if out != source else None
+
+
 def _normalize_ts_import_types(source: bytes, *, tsx: bool = False) -> bytes | None:
     """Rewrite only syntactic TypeScript ``import(...)`` type arguments.
 
@@ -2206,16 +2237,17 @@ def extract_js(path: Path) -> dict:
     else:
         config = _JS_CONFIG
     source_override = None
-    if is_ts:
-        try:
-            source = _read_source_bytes(path)
-            working = _normalize_ts_export_type_star(source) or source
+    try:
+        source = _read_source_bytes(path)
+        working = _normalize_js_split_from_clause(source) or source
+        if is_ts:
+            working = _normalize_ts_export_type_star(working) or working
             normalized = _normalize_ts_import_types(working, tsx=suffix == ".tsx")
-            source_override = normalized if normalized is not None else (
-                working if working is not source else None
-            )
-        except OSError:
-            pass
+            if normalized is not None:
+                working = normalized
+        source_override = working if working is not source else None
+    except OSError:
+        pass
     result = _extract_generic(path, config, source_override=source_override)
     if "error" not in result:
         _extract_js_rationale(path, result)
@@ -2984,6 +3016,7 @@ def extract_vue(path: Path) -> dict:
     else:  # "ts" or unspecified — default to the TS grammar (superset of JS)
         config = _TS_CONFIG
     masked_bytes = masked.encode("utf-8")
+    masked_bytes = _normalize_js_split_from_clause(masked_bytes) or masked_bytes
     if config in (_TS_CONFIG, _TSX_CONFIG):
         masked_bytes = _normalize_ts_import_types(
             masked_bytes, tsx=config is _TSX_CONFIG
