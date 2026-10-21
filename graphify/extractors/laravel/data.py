@@ -330,15 +330,16 @@ class DataPass:
             raw = self._read(rel) if rel in self.fresh else b""
             if not raw:
                 continue
-            wants_static = bool(self.models) and b"::" in raw
-            wants_rules = b"ules" in raw or b"alidat" in raw
+            wants_static = bool(self.models) and b"::" in raw and self._mentions_model(raw)
+            wants_rules = b"ules" in raw or b"alidat" in raw        # an owner class's rules() / $rules
+            wants_validate = b"alidat" in raw                       # ->validate( / Validator::make / validator(
             wants_relations = bool(_RELATION_CALL.search(raw))      # a model, or a trait the models use
             has_special = any(
                 n["id"] in self.models or self.graph.is_a(n["id"], filament.RESOURCE_BASES)
                 or self.graph.is_a(n["id"], RULES_OWNER_BASES)
                 for n in nodes
             )
-            if not (has_special or wants_static or wants_rules or wants_relations):
+            if not (has_special or wants_static or wants_validate or wants_relations):
                 continue
             f = self.load(rel)
             if f is None:
@@ -350,9 +351,9 @@ class DataPass:
                     self.filament(rel, f, n)
                 if self.graph.is_a(n["id"], RULES_OWNER_BASES) and wants_rules:
                     self.request_rules(rel, f, n)
-            if wants_static and self._mentions_model(raw):
+            if wants_static:
                 self.statics(rel, f)
-            if wants_rules:
+            if wants_validate:
                 self.call_site_rules(rel, f)
 
     def _mentions_model(self, raw: bytes) -> bool:

@@ -296,7 +296,9 @@ the `#[Layout]` attribute, `@includeFirst` beyond its first element, Volt functi
 components, multi-file Livewire components, `Fortify::*View('name')`,
 `Mail::send('view', ...)`, a class constant in `@livewire(...)` imported by `@php use`,
 partials included from a Livewire view (they get no owner), `module_path()`-style path
-helpers, a theme view that exists in two themes without a `.graphifyrc` choice, and a
+helpers, a theme view that exists in two themes without a `.graphifyrc` choice, a plain view name
+(`@include("partials/login-screen")`) that only resolves through a view directory a theme system
+prepends to the finder at run time (`.graphifyrc` declares namespaces, not extra plain roots), and a
 component name defined by both a class and a single-file component (ambiguous, no edge).
 
 The Laravel data layer is a registry resolver (runs after `laravel_web`), `laravel_data` (`laravel/data.py`, same

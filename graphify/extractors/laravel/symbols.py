@@ -23,7 +23,7 @@ _CLOSURE_LABEL = re.compile(r"^(?:\{closure#\d+\}|[A-Z]+ \S*)\(\)$")
 
 # Each Laravel pass builds its own SymbolIndex over the same nodes: what a node's path or a file's
 # namespace turns into is computed once per run, not once per pass.
-_REL_MEMO: dict[tuple[str, str], str] = {}
+_REL_MEMO: dict[str, dict[str, str]] = {}      # str(root) -> {source_file: root-relative posix path}
 _NS_MEMO: dict[tuple[str, int, int], str | None] = {}
 
 
@@ -64,7 +64,7 @@ def _loc_line(loc) -> int | None:
 class SymbolIndex:
     def __init__(self, root: Path, all_nodes: list[dict], all_edges: list[dict]):
         self.root = root
-        self._rel_cache: dict[str, str] = {}
+        self._rel_cache = _REL_MEMO.setdefault(str(root), {})   # shared by every index of this root
         self._ns_cache: dict[str, str | None] = {}
         self.nodes: dict[str, dict] = {}
         self.file_nodes: dict[str, dict] = {}
@@ -118,12 +118,7 @@ class SymbolIndex:
         cached = self._rel_cache.get(source_file)
         if cached is not None:
             return cached
-        key = (str(self.root), source_file)
-        out = _REL_MEMO.get(key)
-        if out is None:
-            out = _relativize(self.root, source_file)
-            _REL_MEMO[key] = out
-        self._rel_cache[source_file] = out
+        out = self._rel_cache[source_file] = _relativize(self.root, source_file)
         return out
 
     def file_node(self, rel: str) -> dict | None:
