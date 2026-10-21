@@ -138,3 +138,10 @@ constants and never call targets, so a global helper such as `app()` cannot bind
 `Enum::APP`. Incremental rebuilds forward `case_of` context edges so unchanged enum
 files are excluded the same way. Other languages are unchanged (Swift payload cases
 and Rust variants are callable).
+
+PHP methods (`method` targets) are left out of those indexes too: a plain function
+call needs a function, and a method call carries a receiver (`$this->`, `Foo::`)
+that the member-call resolvers handle. A global helper with no definition in the
+corpus (`dispatch(new X)`) therefore no longer binds to an in-corpus static method
+of the same name. Both are resolution-time changes; per-file extraction output is
+unchanged.
