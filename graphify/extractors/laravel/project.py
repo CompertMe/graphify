@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Sequence
 from pathlib import Path
 
 _FRAMEWORK = "laravel/framework"
@@ -43,7 +44,7 @@ def widen_incremental_targets(
     root: Path,
     targets: list[Path],
     code_files: list[Path],
-    touched: list[Path | str],
+    touched: Sequence[Path | str],
     skip: set[Path] | None = None,
 ) -> list[Path]:
     """Files an incremental (changed-files) rebuild of ``root`` must re-extract.

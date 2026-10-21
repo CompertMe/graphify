@@ -71,9 +71,10 @@ def typed_nodes(root, types: frozenset[str]) -> list:
         from tree_sitter import Query
 
         parser = get_parser()
-        if parser is None:
+        language = parser.language if parser is not None else None
+        if language is None:
             return []
-        query = Query(parser.language, "[" + " ".join(f"({t})" for t in sorted(types)) + "] @n")
+        query = Query(language, "[" + " ".join(f"({t})" for t in sorted(types)) + "] @n")
         _queries[types] = query
     from tree_sitter import QueryCursor
 
