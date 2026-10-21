@@ -52,7 +52,9 @@ def _described(g: dict, relation: str) -> set[tuple[str, str, str]]:
 
 
 def test_render_edges_come_from_the_enclosing_callable(graph):
-    got = _described(graph, "renders")
+    # `renders` to a Blade view is the view pass's (a plain `view('welcome')` route closure);
+    # this test is about the Inertia pages.
+    got = {row for row in _described(graph, "renders") if not row[2].endswith(".blade.php")}
     assert got == {
         ("app/Http/Controllers/BranchController.php", ".index()", "Index.vue"),
         ("app/Http/Controllers/BranchController.php", ".create()", "Form.vue"),
@@ -63,6 +65,7 @@ def test_render_edges_come_from_the_enclosing_callable(graph):
         ("routes/web.php", "GET /about", "About.vue"),
     }
     assert {e["confidence"] for e in _edges(graph, "renders")} == {"EXTRACTED"}
+    assert ("routes/web.php", "GET /()", "welcome.blade.php") in _described(graph, "renders")
 
 
 def test_dynamic_missing_and_unresolvable_pages_get_no_edge(graph):
