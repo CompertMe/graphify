@@ -128,6 +128,7 @@ from graphify.extractors.resolution import (  # noqa: E402,F401
     _js_module_specifier,
     _js_named_specifiers,
     _js_namespace_export_name,
+    _normalize_js_split_from_clause,
     _js_source_path,
     _js_top_level_function_bodies,
     _load_tsconfig_aliases,
@@ -2094,37 +2095,6 @@ def _normalize_ts_export_type_star(source: bytes) -> bytes | None:
         start, end = match.span(1)
         masked[start:end] = b" " * (end - start)
     return bytes(masked)
-
-
-_JS_SPLIT_FROM_RE = re.compile(
-    rb"""(?m)^([ \t]*\}[ \t]*)(\r?\n)([ \t]*)(from[ \t]*(?:'[^'\n]*'|"[^"\n]*"))"""
-)
-
-
-def _normalize_js_split_from_clause(source: bytes) -> bytes | None:
-    """Pull a ``from '...'`` clause that starts the line after a closing ``}`` up.
-
-    ``export {\\n  default as Tabs\\n}\\nfrom './Tabs.vue'`` (the layout some
-    generators and formatters emit) is valid JavaScript, but tree-sitter-javascript
-    and tree-sitter-typescript end the ``export``/``import`` statement at the
-    ``}``: the clause becomes two stray expression statements, so the module
-    string is never seen and the barrel file gets no import/re-export edge at
-    all. A line holding only ``}`` followed by a line starting ``from '...'`` can
-    only be that statement (``from 'x'`` is a syntax error anywhere else), so the
-    clause is moved onto the ``}`` line. The rewrite is byte-for-byte the same
-    length and keeps every line break count, so offsets and line numbers hold.
-    """
-    if b"from" not in source:
-        return None
-
-    def _join(m: re.Match) -> bytes:
-        head, newline, indent, clause = m.groups()
-        sep = b" " if indent else b""
-        pad = b" " * (len(indent) - len(sep))
-        return head + sep + clause + pad + newline
-
-    out = _JS_SPLIT_FROM_RE.sub(_join, source)
-    return out if out != source else None
 
 
 def _normalize_ts_import_types(source: bytes, *, tsx: bool = False) -> bytes | None:
