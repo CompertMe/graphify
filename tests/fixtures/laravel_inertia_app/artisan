@@ -1,0 +1,4 @@
+#!/usr/bin/env php
+<?php
+
+// Fixture marker: a Laravel project has `artisan` at its root.

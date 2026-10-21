@@ -30,6 +30,7 @@ from .pascal_resolution import resolve_pascal_inherited_calls
 from .markdown_resolution import MARKDOWN_MENTION_SUFFIXES, resolve_markdown_mentions
 from .extractors.laravel import (
     LANGUAGE_RESOLVER as _LARAVEL_ROUTES_RESOLVER,
+    WEB_RESOLVER as _LARAVEL_WEB_RESOLVER,
     clear_scan_context as _laravel_clear_scan_context,
     set_scan_context as _laravel_set_scan_context,
 )
@@ -132,6 +133,7 @@ from graphify.extractors.resolution import (  # noqa: E402,F401
     _js_module_specifier,
     _js_named_specifiers,
     _js_namespace_export_name,
+    _normalize_js_split_from_clause,
     _js_source_path,
     _js_top_level_function_bodies,
     _load_tsconfig_aliases,
@@ -2187,16 +2189,17 @@ def extract_js(path: Path) -> dict:
     else:
         config = _JS_CONFIG
     source_override = None
-    if is_ts:
-        try:
-            source = _read_source_bytes(path)
-            working = _normalize_ts_export_type_star(source) or source
+    try:
+        source = _read_source_bytes(path)
+        working = _normalize_js_split_from_clause(source) or source
+        if is_ts:
+            working = _normalize_ts_export_type_star(working) or working
             normalized = _normalize_ts_import_types(working, tsx=suffix == ".tsx")
-            source_override = normalized if normalized is not None else (
-                working if working is not source else None
-            )
-        except OSError:
-            pass
+            if normalized is not None:
+                working = normalized
+        source_override = working if working is not source else None
+    except OSError:
+        pass
     result = _extract_generic(path, config, source_override=source_override)
     if "error" not in result:
         _extract_js_rationale(path, result)
@@ -2965,6 +2968,7 @@ def extract_vue(path: Path) -> dict:
     else:  # "ts" or unspecified — default to the TS grammar (superset of JS)
         config = _TS_CONFIG
     masked_bytes = masked.encode("utf-8")
+    masked_bytes = _normalize_js_split_from_clause(masked_bytes) or masked_bytes
     if config in (_TS_CONFIG, _TSX_CONFIG):
         masked_bytes = _normalize_ts_import_types(
             masked_bytes, tsx=config is _TSX_CONFIG
@@ -7590,6 +7594,8 @@ register_language_resolver(
 # handled_by / uses_middleware edges. A no-op unless the scan root is a Laravel
 # project; the scan root reaches it through _laravel_set_scan_context below.
 register_language_resolver(_LARAVEL_ROUTES_RESOLVER)
+# Inertia page edges + props contract + route('name') links; needs the route nodes above.
+register_language_resolver(_LARAVEL_WEB_RESOLVER)
 register_language_resolver(
     LanguageResolver("rust_self_member_calls", frozenset({".rs"}), _resolve_rust_self_member_calls)
 )

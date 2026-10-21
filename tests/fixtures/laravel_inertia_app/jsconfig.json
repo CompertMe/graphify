@@ -1,0 +1,9 @@
+{
+    "compilerOptions": {
+        "baseUrl": ".",
+        "paths": {
+            "@/*": ["resources/js/*"],
+            "@kit/*": ["node_modules/@acme/kit/*"]
+        }
+    }
+}

@@ -192,7 +192,52 @@ cannot be read as literals, or a route file nothing loads, still yields the rout
 `partial: true` and a `partial_reason`. Filament panel providers become one
 `filament_panel` node with `uses_middleware` edges for `->middleware()` and
 `->authMiddleware()`. `route_name_index(nodes)` maps a route name to its node ids.
-Not modelled: `Route::macro`/package-registered routes, `Route::inertia`, resource
+Not modelled: `Route::macro`/package-registered routes, resource
 `shallow()`/`parameters()` (flagged `partial`), `creatable()`/`destroyable()`
 singletons, `Route::group` string `namespace` beyond a literal, a route file included
 from two groups (the first context wins), and Filament resource/page routes.
+
+A second registry resolver, `laravel_web` (`laravel/web.py`, same Laravel gate, runs
+after `laravel_routes` because it needs the route nodes), links Laravel to Inertia/Vue:
+
+- **Inertia pages** (`inertia.py`). `Route::inertia('/x', 'P', [...])` is a route node
+  (`route_kind: inertia`, `inertia_page`, `inertia_props`). The page root is read from
+  the `resolve:` option of the app entry (`resources/js|ts/{app,ssr,main,index}.*`:
+  `resolvePageComponent(\`./Pages/${name}.vue\`, import.meta.glob('./Pages/**/*.vue'))`,
+  `import(\`./Pages/${name}.vue\`)`); with no readable mapping the roots are
+  `resources/{js,ts}/{Pages,pages}`. A literal name in `Inertia::render('P')`,
+  `inertia('P')`, `inertia()->render('P')` or a route node becomes a `renders` edge
+  (`EXTRACTED`) from the enclosing method, closure (Fortify `loginView(fn () => ...)`)
+  or route node to the page *file* node. A dynamic name, a name no file matches, or one
+  two files match (`About.vue` and `About.js`) gets no edge.
+- **Props contract.** The edge carries `props` (literal keys of the array,
+  `compact('a')`, `array_merge`, `->with()`) and `props_partial` when any part was not
+  spelled out. The page node gets `inertia_page`, `inertia_props_passed`, and, when it
+  declares props (`defineProps` object/array/type literal/same-file `interface` or
+  `type`, `withDefaults`, Options-API `props`), `inertia_props_declared`,
+  `inertia_props_undeclared` (passed, not declared) and `inertia_props_unused`
+  (declared, never passed; skipped when a render call was partial, and `errors` plus
+  the keys of `share()` of a class extending `Inertia\Middleware`, recorded as
+  `inertia_shared_props` on that class, are not counted). Metadata only, never edges.
+- **Named routes** (`ziggy.py`). A string-literal name in `route('x')` (Vue `<script>`
+  via the AST, Vue template text, `.js`/`.ts`), PHP `route()`/`to_route()`/
+  `redirect()->route()`/`Redirect::route()`/`URL::route()` and Blade text becomes a
+  `calls_route` edge to the route node(s) with that name (`route_name_index`);
+  `route().current('x')` becomes `references_route`. The source is the enclosing named
+  function/method/closure when the graph has a node for it, else the file (a template
+  usage belongs to the component). A name defined twice links every definition as
+  `INFERRED` with `ambiguous`. Unknown names, computed names, `current('a.*')`
+  wildcards, `$request->route('param')` and comments get no edge.
+
+Edges are emitted for files extracted in the current run; the page contract reads every
+rendering PHP file. Not modelled: pages resolved through a custom resolver function,
+`Inertia::render` through a variable component, props passed through a variable
+or `->toArray()`, React/Svelte page props, `ziggy` generated files, and auto-registered
+(unimported) Vue components. Template-only component usage needs no pass: a template
+component is always imported in `<script>`, which the JS import edges already cover.
+
+JS side, independent of Laravel: a `}` and its `from '...'` on separate lines
+(`export {\n  default as Tabs\n}\nfrom './Tabs.vue'`) is joined byte-for-byte before parsing
+(tree-sitter ends the statement at `}`), and a named import through a barrel's
+`export { default as X } from './X.vue'` resolves to the `.vue`/`.svelte` file node
+when the barrel exports that name from exactly one module.

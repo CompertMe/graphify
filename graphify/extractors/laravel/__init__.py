@@ -9,6 +9,9 @@ projects only:
 * ``handled_by`` edges to the controller method / closure / component class;
 * ``uses_middleware`` edges to in-corpus middleware classes.
 
+A second pass (``WEB_RESOLVER``, see ``web``) links Laravel to Inertia/Vue: ``renders``
+edges to page files, the props contract, and ``route('name')`` -> route node edges.
+
 It plugs in through ``graphify.resolver_registry`` (``LANGUAGE_RESOLVER``) and one
 hook in ``extract.extract()`` that tells it the scan root. A corpus that is not a
 Laravel project (no ``artisan`` at the root, no ``laravel/framework`` in
@@ -29,6 +32,8 @@ from graphify.resolver_registry import LanguageResolver
 
 __all__ = [
     "LANGUAGE_RESOLVER",
+    "WEB_RESOLVER",
+    "resolve_laravel_web",
     "ROUTE_KIND",
     "clear_scan_context",
     "resolve_laravel_routes",
@@ -117,4 +122,22 @@ def resolve_laravel_routes(per_file: list, all_nodes: list[dict], all_edges: lis
 
 LANGUAGE_RESOLVER = LanguageResolver(
     "laravel_routes", frozenset({".php"}), resolve_laravel_routes
+)
+
+
+def resolve_laravel_web(per_file: list, all_nodes: list[dict], all_edges: list[dict]) -> None:
+    """Inertia page edges, the props contract and Ziggy/``route()`` links (see ``web``)."""
+    root = _scan_root
+    if root is None or not is_laravel_project(root):
+        return
+    from graphify.extractors.laravel import web
+
+    web.run(root, per_file, all_nodes, all_edges)
+
+
+# Runs after LANGUAGE_RESOLVER: it needs the route nodes that pass emits.
+WEB_RESOLVER = LanguageResolver(
+    "laravel_web",
+    frozenset({".php", ".vue", ".js", ".jsx", ".ts", ".tsx", ".mjs"}),
+    resolve_laravel_web,
 )
