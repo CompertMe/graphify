@@ -5939,6 +5939,8 @@ def _resolve_php_member_calls(
         ):
             type_def_nids.setdefault(class_key(node.get("label", "")), []).append(node["id"])
 
+    php_type_nids = {nid for nids in type_def_nids.values() for nid in nids}
+
     method_index: dict[tuple[str, str], set[str]] = {}
     enclosing_type: dict[str, str] = {}
     for edge in all_edges:
@@ -6013,6 +6015,14 @@ def _resolve_php_member_calls(
                 if len(type_defs) != 1:
                     continue
                 type_nid = type_defs[0]
+            elif not receiver.startswith("$") and "php_scope_nid" in raw_call:
+                # Bound by `_resolve_php_type_references` with PHP name rules (use
+                # alias / same namespace / leading `\`); empty = names no in-corpus
+                # type, so no edge (a same-named class elsewhere is a decoy).
+                scope_nid = raw_call["php_scope_nid"]
+                if not scope_nid or scope_nid not in php_type_nids:
+                    continue
+                type_nid = scope_nid
             elif not receiver.startswith("$"):
                 type_defs = type_def_nids.get(class_key(receiver), [])
                 if not type_defs:
