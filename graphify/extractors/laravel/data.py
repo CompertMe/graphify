@@ -162,6 +162,9 @@ class DataPass:
         self.tables: dict[str, migrations.TableDef] = {}
         self._table_memo: dict[str, tuple[str, str] | None] = {}
         self._superseded: set[tuple[str, str]] = set()
+        self._generic: dict[tuple[str, str], list[dict]] | None = None
+        self._linked: set[frozenset] | None = None
+        self._mine: set[frozenset] = set()       # node pairs this pass has linked
         self.model_edges: dict[tuple[str, str], dict] = {}
 
     # ── plumbing ────────────────────────────────────────────────────────────
@@ -191,12 +194,20 @@ class DataPass:
         prior = self.edges.get(key)
         if prior is not None:
             return prior
+        inherited = self.generic_line(src, tgt)
+        if inherited is not None:
+            # The typed edge takes over the Phase-0 `references_constant` on this pair (the graph
+            # keeps one edge per pair) and sits where that edge sat, so a consumer that looks for
+            # the `X::class` mention at its line still finds it.
+            line = inherited
+            self._superseded.add((src, tgt))
         e = {
             "source": src, "target": tgt, "relation": relation, "confidence": conf,
             "source_file": sf, "source_location": f"L{line}", "weight": 1.0, "context": context,
         }
         e.update({k: v for k, v in extra.items() if v is not None})
         self.edges[key] = e
+        self._mine.add(frozenset((src, tgt)))
         return e
 
     @staticmethod
@@ -218,17 +229,27 @@ class DataPass:
         """
         self._superseded.add((src, tgt))
 
+    def _generic_edges(self) -> dict[tuple[str, str], list[dict]]:
+        if self._generic is None:
+            self._generic = {}
+            for e in self.all_edges:
+                if e.get("relation") == "references_constant":
+                    self._generic.setdefault((e.get("source", ""), e.get("target", "")), []).append(e)
+        return self._generic
+
+    def generic_line(self, src: str, tgt: str) -> int | None:
+        """Earliest line of the Phase-0 ``references_constant`` edge(s) from ``src`` to ``tgt``."""
+        lines = [
+            int(e["source_location"][1:]) for e in self._generic_edges().get((src, tgt), [])
+            if isinstance(e.get("source_location"), str) and e["source_location"][1:].isdigit()
+        ]
+        return min(lines) if lines else None
+
     def apply_supersede(self) -> None:
-        generic: dict[tuple[str, str], list[dict]] = {}
-        for e in self.all_edges:
-            if e.get("relation") == "references_constant":
-                generic.setdefault((e.get("source", ""), e.get("target", "")), []).append(e)
-        for src, tgt in self._superseded:
-            # Either direction: the graph is undirected, so a page's `references_constant` back to its
-            # resource would otherwise displace (or be displaced by) the typed edge on the same pair.
-            for pair in ((src, tgt), (tgt, src)):
-                for e in generic.get(pair, []):
-                    e["_drop"] = True
+        generic = self._generic_edges()
+        for pair in self._superseded:
+            for e in generic.get(pair, []):
+                e["_drop"] = True
 
     def class_nid(self, fqn: str | None) -> str | None:
         return self.idx.resolve_class(fqn)
@@ -581,25 +602,36 @@ class DataPass:
         facts = filament.read_resource(f, view)
         if facts.model:
             model = self.class_nid(facts.model)
-            if model is not None and self.edge(
-                cid, model, "filament_resource_for", "EXTRACTED", rel, facts.model_line, "filament_resource"
-            ):
-                self.supersede(cid, model)
-        for ref in facts.pages:
-            tgt = self.class_nid(ref.fqn)
-            if tgt is None:
-                continue
-            e = self.edge(cid, tgt, "filament_page", "EXTRACTED", rel, ref.line, "filament_resource", route=ref.route)
-            self.add_to(e, "keys", ref.key or "")
-            if e is not None:
-                e["keys"] = [x for x in e["keys"] if x]
-                self.supersede(cid, tgt)
-        for ref in facts.relations:
-            tgt = self.class_nid(ref.fqn)
-            if tgt is None:
-                continue
-            if self.edge(cid, tgt, "filament_relation_manager", "EXTRACTED", rel, ref.line, "filament_resource"):
-                self.supersede(cid, tgt)
+            if model is not None:
+                self.edge(cid, model, "filament_resource_for", "EXTRACTED", rel, facts.model_line, "filament_resource")
+        for relation, refs, getter in (
+            ("filament_page", facts.pages, "getPages"),
+            ("filament_relation_manager", facts.relations, "getRelations"),
+        ):
+            mnode = self.method_node(cid, getter, rel)
+            for ref in refs:
+                tgt = self.class_nid(ref.fqn)
+                if tgt is None:
+                    continue
+                # getPages() / getRelations() -> the class: always unique on its pair.
+                for owner in ([mnode["id"]] if mnode is not None else []):
+                    e = self.edge(owner, tgt, relation, "EXTRACTED", rel, ref.line, "filament_resource", route=ref.route)
+                    self.add_to(e, "keys", ref.key or "")
+                    if e is not None and "keys" in e:
+                        e["keys"] = [x for x in e["keys"] if x]
+                # resource -> the class: only where nothing else already links the two. A page names
+                # its resource back (`$resource = XResource::class`), and the graph keeps one edge per pair.
+                if not self.linked(cid, tgt):
+                    e = self.edge(cid, tgt, relation, "EXTRACTED", rel, ref.line, "filament_resource", route=ref.route)
+                    self.add_to(e, "keys", ref.key or "")
+                    if e is not None and "keys" in e:
+                        e["keys"] = [x for x in e["keys"] if x]
+
+    def linked(self, a: str, b: str) -> bool:
+        """Is there already an edge (any relation, either direction) between the two nodes?"""
+        if self._linked is None:
+            self._linked = {frozenset((e.get("source"), e.get("target"))) for e in self.all_edges}
+        return frozenset((a, b)) in self._linked or frozenset((a, b)) in self._mine
 
 
 def resolve_laravel_data(per_file: list, all_nodes: list[dict], all_edges: list[dict]) -> None:

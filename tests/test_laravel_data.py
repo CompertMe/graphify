@@ -171,13 +171,32 @@ def test_non_literal_related_class_gives_nothing(graph):
 
 
 def test_phase0_reference_is_replaced_not_duplicated(graph):
-    """The typed edge supersedes the generic references_constant on the same node pair."""
+    """A typed edge takes over the generic references_constant on the same (source, target) pair,
+    on the line that edge had; the inverse direction (a different edge) is left alone."""
     generic = {(_label(s), _label(t)) for _e, s, t in _edges(graph, "references_constant")}
     assert (".client()", "Client") not in generic
     assert ("Branch", "BranchType") not in generic          # cast target
     assert ("BranchResource", "Branch") not in generic      # $model
-    # A page's `$resource = BranchResource::class` is the inverse reference on the same node pair.
-    assert ("ListBranches", "BranchResource") not in generic
+    assert (".getPages()", "CreateBranch") not in generic   # now filament_page from the method
+    # The line is the generic edge's: `belongsTo(Client::class ...)` is on line 20 of Branch.php.
+    assert _edge(graph, "eloquent_belongs_to", ".client()", "Client")["source_location"] == "L20"
+    assert _edge(graph, "casts_to", "Branch", "BranchType")["source_location"] == "L14"
+
+
+def test_inverse_generic_reference_is_kept_and_the_pair_not_linked_twice(graph):
+    """`ListBranches::$resource = BranchResource::class` already links the pair (page -> resource);
+    a second edge on the same undirected pair would displace it, so only the getPages() method links."""
+    generic = {(_label(s), _label(t)) for _e, s, t in _edges(graph, "references_constant")}
+    assert ("ListBranches", "BranchResource") in generic
+    assert not [
+        1 for _e, s, t in _edges(graph, "filament_page")
+        if _label(s) == "BranchResource" and _label(t) == "ListBranches"
+    ]
+    mine = [
+        e for e, s, t in _edges(graph, "filament_page")
+        if s["source_file"] == "app/Filament/Resources/BranchResource.php" and _label(t) == "ListBranches"
+    ]
+    assert len(mine) == 1 and mine[0]["keys"] == ["index"]
 
 
 # ── casts ───────────────────────────────────────────────────────────────────
@@ -361,15 +380,24 @@ def test_resource_model_pages_and_relation_managers(graph):
     f = _pairs(graph, "filament_resource_for", "filament_page", "filament_relation_manager")
     assert f == {
         ("filament_resource_for", "BranchResource", "Branch", "EXTRACTED"),
-        ("filament_page", "BranchResource", "ListBranches", "EXTRACTED"),
+        # getPages() / getRelations() -> class: one per entry
+        ("filament_page", ".getPages()", "ListBranches", "EXTRACTED"),      # BranchResource's and ClientResource's
+        ("filament_page", ".getPages()", "CreateBranch", "EXTRACTED"),
+        ("filament_page", ".getPages()", "EditBranch", "EXTRACTED"),
+        ("filament_page", ".getPages()", "EditClient", "EXTRACTED"),
+        ("filament_relation_manager", ".getRelations()", "EmployeesRelationManager", "EXTRACTED"),
+        ("filament_relation_manager", ".getRelations()", "TagsRelationManager", "EXTRACTED"),        # RelationGroup
+        ("filament_relation_manager", ".getRelations()", "AuditRelationManager", "EXTRACTED"),       # FQCN
+        ("filament_relation_manager", ".getRelations()", "BranchesRelationManager", "EXTRACTED"),
+        # resource -> class where nothing else links the pair (ListBranches names its resource back)
         ("filament_page", "BranchResource", "CreateBranch", "EXTRACTED"),
         ("filament_page", "BranchResource", "EditBranch", "EXTRACTED"),
-        ("filament_relation_manager", "BranchResource", "EmployeesRelationManager", "EXTRACTED"),
-        ("filament_relation_manager", "BranchResource", "TagsRelationManager", "EXTRACTED"),         # RelationGroup
-        ("filament_relation_manager", "BranchResource", "AuditRelationManager", "EXTRACTED"),        # FQCN
         ("filament_resource_for", "ClientResource", "Client", "EXTRACTED"),
         ("filament_page", "ClientResource", "ListBranches", "EXTRACTED"),
         ("filament_page", "ClientResource", "EditClient", "EXTRACTED"),
+        ("filament_relation_manager", "BranchResource", "EmployeesRelationManager", "EXTRACTED"),
+        ("filament_relation_manager", "BranchResource", "TagsRelationManager", "EXTRACTED"),
+        ("filament_relation_manager", "BranchResource", "AuditRelationManager", "EXTRACTED"),
         ("filament_relation_manager", "ClientResource", "BranchesRelationManager", "EXTRACTED"),
     }
 
@@ -377,16 +405,16 @@ def test_resource_model_pages_and_relation_managers(graph):
 def test_filament_pages_resolve_through_the_import_alias_not_the_short_name(graph):
     # Two classes are called ListBranches; each resource's page is the one in its own namespace.
     lists = {
-        _label(s): t["source_file"]
-        for _e, s, t in _edges(graph, "filament_page") if _label(t) == "ListBranches"
+        s["source_file"]: t["source_file"]
+        for _e, s, t in _edges(graph, "filament_page") if _label(t) == "ListBranches" and _label(s) == ".getPages()"
     }
     assert lists == {
-        "BranchResource": "app/Filament/Resources/BranchResource/Pages/ListBranches.php",
-        "ClientResource": "app/Filament/Resources/Clients/Pages/ListBranches.php",
+        "app/Filament/Resources/BranchResource.php": "app/Filament/Resources/BranchResource/Pages/ListBranches.php",
+        "app/Filament/Resources/Clients/ClientResource.php": "app/Filament/Resources/Clients/Pages/ListBranches.php",
     }
     e = _edge(graph, "filament_page", "BranchResource", "EditBranch")
     assert e["route"] == "/{record}/edit" and e["keys"] == ["edit"]
-    pages = {_label(t) for _e, s, t in _edges(graph, "filament_page") if _label(s) == "BranchResource"}
+    pages = {_label(t) for _e, _s, t in _edges(graph, "filament_page")}
     assert "NoSuchPage" not in pages
 
 
