@@ -10471,10 +10471,22 @@ def extract(
         for e in (*all_edges, *(resolution_context_edges or ()))
         if e.get("relation") == "case_of"
     }
+    # Likewise a PHP method is never what a plain function call names: it needs a receiver
+    # (`$this->`, `Foo::`), which the extractor marks as a member call and resolves on its
+    # own. Without this the Laravel helper `dispatch(new X)` bound to any in-corpus static
+    # method called `dispatch`.
+    _php_method_nids = {
+        e.get("target")
+        for e in (*all_edges, *(resolution_context_edges or ()))
+        if e.get("relation") == "method"
+    }
     for n in resolution_nodes:
         if n.get("file_type") == "rationale" or n.get("type") == "namespace":
             continue
-        if n.get("id") in _php_case_nids and _lang_family(n.get("source_file")) == "php":
+        if (
+            (n.get("id") in _php_case_nids or n.get("id") in _php_method_nids)
+            and _lang_family(n.get("source_file")) == "php"
+        ):
             continue
         raw = n.get("label", "")
         normalised = raw.strip("()").lstrip(".")

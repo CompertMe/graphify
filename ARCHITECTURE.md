@@ -169,6 +169,11 @@ constants and never call targets, so a global helper such as `app()` cannot bind
 files are excluded the same way. Other languages are unchanged (Swift payload cases
 and Rust variants are callable).
 
+PHP methods (`method` targets) are excluded from those indexes too: a plain function call
+needs a function, and a method call carries a receiver (`$this->`, `Foo::`) that the member-call
+resolvers handle. `dispatch(new X)` (the Laravel helper) therefore no longer binds to an
+in-corpus static method named `dispatch`.
+
 Laravel routes are modelled by `graphify/extractors/laravel/`, a registry resolver
 (`laravel_routes`, PHP suffixes) that runs only for a Laravel project: `artisan` at the
 scan root, or `laravel/framework` in `composer.json`. Any other PHP corpus comes out
