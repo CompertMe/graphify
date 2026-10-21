@@ -1,3 +1,21 @@
+> [!IMPORTANT]
+> **New in this fork: full Laravel support.** On a Laravel project the graph now links:
+>
+> - routes, middleware and abilities
+> - Blade, Livewire and Inertia pages
+> - Eloquent relations and tables
+> - jobs, events and the scheduler
+> - gates, config and translation keys
+>
+> On six real Laravel apps, route-to-controller coverage went from 0% to 100% and wrong edges fell from 755 to 5.
+>
+> - **Results, with before and after numbers:** https://compertme.github.io/graphify/
+> - **Install it on any machine and connect Claude Code, Cursor, Codex or any agent:** [LARAVEL.md](LARAVEL.md)
+>
+> ```bash
+> uv tool install --force "git+https://github.com/CompertMe/graphify@laravel"
+> ```
+
 <p align="center">
   <a href="https://graphify.com"><img src="https://raw.githubusercontent.com/Graphify-Labs/graphify/v8/docs/graphify-logo.png" width="360" height="189" alt="Graphify"/></a>
 </p>
