@@ -293,3 +293,57 @@ components, multi-file Livewire components, `Fortify::*View('name')`,
 partials included from a Livewire view (they get no owner), `module_path()`-style path
 helpers, a theme view that exists in two themes without a `.graphifyrc` choice, and a
 component name defined by both a class and a single-file component (ambiguous, no edge).
+
+Laravel authorization and keys (`laravel/authz.py`, `keys.py`, driven by `authzkeys.py`; third
+registry resolver `laravel_authz_keys`, same gate, runs after `laravel_web` because it reads the route
+nodes). Nodes: `laravel_ability` (label `ability:create-branches`, id = slug + hash of the name),
+`laravel_config_key` (`config:app.name`), `laravel_translation_key` (`lang:messages.welcome`).
+- **Abilities.** A node exists for a literal `Gate::define('x', ...)` (also `Gate::resource`,
+  which defines `res.view` etc. for the policy methods that exist) and for a name some check uses that
+  equals the string value of exactly one in-corpus enum case (spatie-style `PermissionEnum`; the link
+  ability -> case is `references_constant`, `INFERRED`, rule in the edge). `Gate::define($dynamic, ..)`
+  and abilities nothing defines get no node. `handled_by` (`EXTRACTED`) goes to the closure, the
+  `[C::class, 'm']` / `'C@m'` / invokable method; a closure the extractor has no node for gets none.
+  `checks_ability` (`EXTRACTED`, the name is written in the source) goes from the enclosing method /
+  closure (the file for Blade) to the ability for `Gate::allows|denies|check|authorize|inspect|any|none`
+  (also through `Gate::forUser()`), `->can|cannot|cant|canAny()` on any non-`Route` receiver,
+  `$this->authorize()`, `$this->middleware('can:x')` and Blade `@can|@cannot|@canany|@elsecan` /
+  `->can()` text; from a route node for the `can:` entries of its effective middleware (`can:x`,
+  `->can('x')`). The argument may be a literal, `Enum::CASE->value` or `Enum::CASE`. `Gate`, `Config` and
+  `Lang` count only when the written name resolves (PHP name rules) to the Laravel facade or the global
+  alias.
+- **Policies.** `policy_for` (policy class -> model): `Gate::policy(M::class, P::class)`, the
+  `$policies` array and `#[UsePolicy(P::class)]` are `EXTRACTED` (two different policies for one model
+  = none); Laravel's `guessPolicyName` convention (deepest `...\Policies\XPolicy` that exists) is
+  `INFERRED`. When a check names the model statically (`X::class`, `new X`, a typed parameter of the
+  enclosing function; Blade only a qualified `Fq\X::class`; route `can:ability,Fq\X`) and the policy
+  declares (or inherits) the ability as a method, `checks_ability` goes to that policy method
+  (`INFERRED`, `via` = how the policy was found) instead of an ability node. An unknown model, a model
+  without a policy or a missing method gives nothing.
+- **Config keys.** `config/**/*.php` and files registered with `$this->mergeConfigFrom(literal path,
+  'key')` give one node per literal leaf (`app.name`), contained by the file; a list (no string keys), or
+  an array nested deeper than 4 levels, is a leaf; numeric/computed keys are skipped; `env('X', d)`
+  names go to `metadata.env` / `env_default`. `config('a.b')`, `config([..])` (`access: set`),
+  `Config::get|string|...`, `config()->get()`, `app('config')->get()` and Blade `config('a.b')` give
+  `reads_config`: `EXTRACTED` to the exact leaf, `INFERRED` (`resolved_as: parent`) to the nearest leaf
+  above the key (`config('app.providers.0')`), `INFERRED` (`resolved_as: file`) to the config file for
+  a key naming a whole branch of one file. Two files defining one key = every definition, `ambiguous`.
+  One edge per (usage, key): repeated reads collapse onto the first.
+- **Translation keys.** `{lang,resources/lang}/<locale>/<group>.php` (nested arrays to `group.a.b`)
+  and `loadTranslationsFrom(literal path, 'ns')` (`ns::group.key`) give one node per key across all
+  locales (`metadata.locales`, `missing_locales`; source file = the `en` file, else the first locale),
+  JSON lang files (`lang/<locale>.json`) one node per string. A key gets a node only when some usage
+  reads it: defining every string added +40% nodes on two of the six measured apps (the
+  lang files hold more strings than the code reads), so unused keys stay out of the graph (the
+  pass logs `translation_keys_defined` / `translation_keys_used`). `__()`, `trans()`, `trans_choice()`,
+  `Lang::get|choice|has`, Blade `@lang` give `uses_translation` (`EXTRACTED`); JSON keys win over
+  `group.key` as in Laravel. A `group.key`-shaped name no file defines is not linked; the usage file
+  records it in `metadata.missing_translation_keys` (and a count; free text such as `__('Save')` is just a
+  default-locale string and is not reported). Keys of an array branch (`__('messages.errors')`) are not
+  missing and get no edge.
+- Edges and nodes are emitted for files extracted in this run, like the route pass; the indexes read every
+  file. Not modelled: `Gate::before/after`, `authorizeResource`, `permission:`/`role:` middleware
+  (spatie), abilities from `$user->hasPermissionTo()`, class constants as ability names, a model passed
+  through a property or a call, `lang/vendor/` overrides, JSON translations of package paths,
+  `module_path()` / `config_path()` style paths in `mergeConfigFrom`, `config()` keys built at runtime,
+  config values returned by `array_merge(...)` and Vue/JS `$t()` calls.
