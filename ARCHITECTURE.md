@@ -473,6 +473,21 @@ method nodes plus source files and are independent of each other and of the auth
 emit the same relation, with one overlap: `laravel_authz_keys` links an ability to an enum case with
 `references_constant`, a pair neither of the others touches.
 
+**Incremental rebuilds.** Every Laravel pass emits an edge only for the files it was handed
+(`fresh`), but the edges join files through names declared elsewhere (`route('x')` in a Vue file
+and the route named `x`; `Schedule::command('sig')` and the command declaring `sig`; a model and the
+migration that creates its table; `config('a.b')` and the config file). A hook rebuild
+(`_rebuild_code(changed_paths=...)`) re-extracts only the changed files, which left an unchanged
+file's edge stale after its target was renamed and missing after the target appeared.
+`laravel.project.widen_incremental_targets` closes that: when a changed or deleted file is PHP, Blade,
+Vue or JS/TS in a Laravel project, `extract_targets` becomes every such file of the project (the
+per-file AST cache makes the unchanged ones cheap), so the passes run over the same input as a
+`--force` build and the old Laravel edges of every one of those files are replaced by reconcile's
+ordinary source-file ownership. A change to anything else (Markdown, JSON) and any non-Laravel
+project keep the exact changed-files-only behaviour. `tests/test_laravel_incremental.py` compares the
+incremental graph with a fresh full build. Not covered: a changed `lang/*.json` or `composer.json`
+alone (not code files, so the rebuild is skipped as before).
+
 **One edge per node pair.** The built graph keeps one edge per node pair, and the PHP extractor
 adds a plain `references_constant` for every `Foo::class` mention, so two facts about one pair
 would otherwise be decided by edge sort order (relation name). Two places handle it, and they

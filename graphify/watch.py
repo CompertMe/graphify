@@ -1968,7 +1968,14 @@ def _rebuild_code(
             if not wanted and not deleted_paths:
                 print("[graphify watch] No tracked code files in change set - skipping rebuild.")
                 return True
-            extract_targets = wanted
+            # Laravel edges join files through names declared elsewhere (a route name, a command
+            # signature, a table, a config key), so a changed route/PHP/Vue file re-extracts every
+            # file those passes read, or an unchanged file keeps a stale edge / misses a new one.
+            from graphify.extractors.laravel.project import widen_incremental_targets
+            extract_targets = widen_incremental_targets(
+                watch_root, wanted, code_files,
+                [*wanted, *deleted_source_identities], skip=semantic_doc_set,
+            )
         else:
             # Full rebuild: skip the AST quick-scan for semantic-backed docs
             # (#1915). They remain in code_files for corpus membership and
