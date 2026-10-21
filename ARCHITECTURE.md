@@ -134,9 +134,11 @@ The extractor records the name as written on the edge (`_php_raw`, stripped
 before output) and `self`/`static` map to the enclosing class. A name imported
 from outside the corpus keeps the shared FQN-labelled external stub; a
 `::class` that resolves to neither is dropped, never guessed. Not covered:
-`Foo::class` in a method's parameter default, a `new \A\B()` or static call
-written with a qualified name (those still resolve by bare name), and
-`namespace` blocks that mix several namespaces in one file. `references_constant`
+`Foo::class` in a method's parameter default, a `new \A\B()` written with a
+qualified name (it still resolves by bare name), and `namespace` blocks that
+mix several namespaces in one file. The scope of a static call
+(`Pages\ListX::route()`) goes through the same name rules, so it binds to the
+class that name denotes or to nothing. `references_constant`
 is a generic relation when the graph collapses a node pair to one edge (like
 `references`), so a method naming its own class, or a file that both imports and
 `::class`-references a class, keeps its `method` / `imports` edge. The AST cache
